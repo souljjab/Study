@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="guard_desc">집중 모드나 수동 차단 중에 차단 목록의 앱이 열리면 홈 화면으로 돌려보냅니다. 화면 내용은 읽지 않습니다.</string>
+</resources>

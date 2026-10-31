@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.Locale;
 
 /** 차단 목록, 수동 차단 여부, 집중 모드 종료 시각을 저장한다. */
@@ -16,7 +18,16 @@ final class Store {
             "afreecatv.com", "netflix.com", "tving.com", "watcha.com", "wavve.com",
             "instagram.com", "facebook.com", "twitter.com", "x.com", "tiktok.com",
             "reddit.com", "dcinside.com", "fmkorea.com", "ruliweb.com", "theqoo.net",
-            "webtoon.naver.com", "comic.naver.com", "namu.wiki"
+            "webtoon.naver.com", "comic.naver.com", "namu.wiki",
+            "ytimg.com", "youtubei.googleapis.com", "youtube.googleapis.com", "youtube-nocookie.com",
+            "cdninstagram.com", "fbcdn.net", "instagr.am", "threads.net"
+    };
+
+    private static final String[] DEFAULT_APPS = {
+            "com.google.android.youtube", "com.instagram.android", "com.facebook.katana",
+            "com.twitter.android", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill",
+            "com.netflix.mediaclient", "tv.twitch.android.app", "com.reddit.frontpage",
+            "com.nhn.android.webtoon", "com.instagram.barcelona"
     };
 
     private Store() {}
@@ -49,8 +60,28 @@ final class Store {
         } else {
             for (String s : raw.split("\n")) if (!s.isEmpty()) out.add(s);
         }
+        if (p(c).getInt("sitesVer", 0) < 2) { // 새로 추가된 기본 도메인을 기존 목록에 합친다.
+            for (String d : DEFAULT_SITES) if (!out.contains(d)) out.add(d);
+            saveSites(c, out);
+            p(c).edit().putInt("sitesVer", 2).apply();
+        }
         Collections.sort(out);
         return out;
+    }
+
+    static Set<String> apps(Context c) {
+        String raw = p(c).getString("apps", null);
+        Set<String> out = new TreeSet<>();
+        if (raw == null) {
+            out.addAll(Arrays.asList(DEFAULT_APPS));
+        } else {
+            for (String s : raw.split("\n")) if (!s.isEmpty()) out.add(s);
+        }
+        return out;
+    }
+
+    static void saveApps(Context c, Set<String> apps) {
+        p(c).edit().putString("apps", String.join("\n", apps)).apply();
     }
 
     static void saveSites(Context c, List<String> sites) {

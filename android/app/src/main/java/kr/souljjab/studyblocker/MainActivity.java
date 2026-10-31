@@ -1,7 +1,12 @@
 package kr.souljjab.studyblocker;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.provider.Settings;
 import android.net.VpnService;
 import android.os.Bundle;
 import android.os.Handler;
@@ -16,7 +21,10 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 public class MainActivity extends Activity {
     private static final int REQ_VPN = 1;
@@ -69,6 +77,16 @@ public class MainActivity extends Activity {
         manualBtn.setOnClickListener(v -> toggleManual());
         root.addView(manualBtn);
 
+        Button appsBtn = new Button(this);
+        appsBtn.setText("차단할 앱 선택");
+        appsBtn.setOnClickListener(v -> pickApps());
+        root.addView(appsBtn);
+
+        Button accBtn = new Button(this);
+        accBtn.setText("앱 차단 켜기 (접근성 권한 설정 열기)");
+        accBtn.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        root.addView(accBtn);
+
         TextView hdr = new TextView(this);
         hdr.setText("\n차단 목록 (항목을 누르면 삭제)");
         hdr.setTextSize(16);
@@ -120,6 +138,9 @@ public class MainActivity extends Activity {
             status.setText("🚫 차단 중 (수동)");
         } else {
             status.setText("차단 꺼짐");
+        }
+        if (!AppGuardService.isEnabled(this)) {
+            status.append("\n⚠️ 앱 차단: 아래 '접근성 권한'에서 '공부 집중 차단기'를 켜야 유튜브·인스타 앱이 차단돼요");
         }
         manualBtn.setText(Store.manual(this) ? "수동 차단 해제" : "지금 바로 차단 (수동)");
         manualBtn.setEnabled(!Store.locked(this));
@@ -177,6 +198,58 @@ public class MainActivity extends Activity {
                 startService(new Intent(this, BlockVpnService.class));
                 refreshStatus();
             });
+        }
+    }
+
+    private void pickApps() {
+        PackageManager pm = getPackageManager();
+        Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        final List<String> pkgs = new ArrayList<>();
+        final List<String> labels = new ArrayList<>();
+        for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
+            String pkg = ri.activityInfo.packageName;
+            if (pkg.equals(getPackageName()) || pkgs.contains(pkg)) continue;
+            pkgs.add(pkg);
+        }
+        final Set<String> blocked = Store.apps(this);
+        // 차단된 앱을 위로, 나머지는 이름순
+        pkgs.sort((a, b) -> {
+            int ba = blocked.contains(a) ? 0 : 1, bb = blocked.contains(b) ? 0 : 1;
+            return ba != bb ? ba - bb : label(pm, a).compareToIgnoreCase(label(pm, b));
+        });
+        final boolean[] checked = new boolean[pkgs.size()];
+        for (int i = 0; i < pkgs.size(); i++) {
+            labels.add(label(pm, pkgs.get(i)));
+            checked[i] = blocked.contains(pkgs.get(i));
+        }
+        final boolean locked = Store.locked(this);
+        final AlertDialog[] dlg = new AlertDialog[1];
+        dlg[0] = new AlertDialog.Builder(this)
+                .setTitle(locked ? "차단할 앱 (집중 중엔 추가만 가능)" : "차단할 앱")
+                .setMultiChoiceItems(labels.toArray(new String[0]), checked, (d, which, on) -> {
+                    if (locked && !on && blocked.contains(pkgs.get(which))) {
+                        dlg[0].getListView().setItemChecked(which, true);
+                    }
+                    checked[which] = dlg[0].getListView().isItemChecked(which);
+                })
+                .setPositiveButton("저장", (d, w) -> {
+                    Set<String> out = new TreeSet<>();
+                    for (int i = 0; i < pkgs.size(); i++) if (checked[i]) out.add(pkgs.get(i));
+                    // 목록에 안 보이는(미설치) 기본 앱은 유지한다.
+                    for (String b : blocked) if (!pkgs.contains(b)) out.add(b);
+                    Store.saveApps(this, out);
+                })
+                .setNegativeButton("취소", null)
+                .create();
+        dlg[0].show();
+    }
+
+    private static String label(PackageManager pm, String pkg) {
+        try {
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            return String.valueOf(pm.getApplicationLabel(ai));
+        } catch (PackageManager.NameNotFoundException e) {
+            return pkg;
         }
     }
 
