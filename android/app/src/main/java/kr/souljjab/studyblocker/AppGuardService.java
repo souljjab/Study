@@ -3,12 +3,12 @@ package kr.souljjab.studyblocker;
 import android.accessibilityservice.AccessibilityService;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.accessibility.AccessibilityEvent;
-import android.widget.Toast;
 
-/** 차단 중에 차단 목록의 앱이 화면에 뜨면 홈 화면으로 돌려보낸다. */
+/** 차단 중에 차단 목록의 앱이 화면에 뜨면 홈으로 보내고 차단 화면을 띄운다. */
 public class AppGuardService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
@@ -16,8 +16,16 @@ public class AppGuardService extends AccessibilityService {
         CharSequence pkg = e.getPackageName();
         if (pkg == null || !Store.shouldBlock(this)) return;
         if (Store.apps(this).contains(pkg.toString())) {
+            String label = pkg.toString();
+            try {
+                label = getPackageManager().getApplicationLabel(
+                        getPackageManager().getApplicationInfo(label, 0)).toString();
+            } catch (Exception ignored) {
+            }
             performGlobalAction(GLOBAL_ACTION_HOME);
-            Toast.makeText(this, "📚 집중 중! 딴짓 금지", Toast.LENGTH_SHORT).show();
+            startActivity(new Intent(this, BlockedActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    .putExtra(BlockedActivity.EXTRA_LABEL, label));
         }
     }
 

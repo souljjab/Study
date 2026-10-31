@@ -13,4 +13,11 @@ hosts 파일로 유튜브·SNS·커뮤니티 등 딴짓 사이트를 차단합�
 - 처음 차단을 켤 때 VPN 연결 요청이 뜨면 "확인" (DNS 질의만 처리하며, 다른 트래픽은 그대로 통과)
 - 앱 차단(유튜브·인스타 앱 등): 설정 > 접근성에서 '공부 집중 차단기'를 켜면, 차단 중 목록의 앱을 열 때 홈 화면으로 돌려보냄. '차단할 앱 선택'에서 앱 추가/삭제
 - 집중 모드/수동 차단/사이트 추가·삭제는 Windows 버전과 동일하게 동작
-- 재빌드: `cd android && ./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`
+- 차단 앱을 열면 '딴짓 금지' 전체 화면과 남은 시간이 뜸
+- 재빌드: `cd android && ./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
+  (서명 키는 `android/keystore/`에 포함돼 있어 어디서 빌드해도 기존 앱 위에 업데이트 설치됨)
+- 화면 스크린샷 갱신: `./gradlew recordPaparazziDebug`
+
+| 꺼짐(처음 실행) | 집중 중 | 수동 차단 | 차단 화면 |
+|---|---|---|---|
+| ![](docs/screenshots/off_firstRun.png) | ![](docs/screenshots/focus.png) | ![](docs/screenshots/manual.png) | ![](docs/screenshots/blocked.png) |

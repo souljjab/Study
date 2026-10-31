@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -95,6 +96,38 @@ final class Store {
     static long lockEnd(Context c) { return p(c).getLong("lockEnd", 0); }
 
     static void setLockEnd(Context c, long end) { p(c).edit().putLong("lockEnd", end).apply(); }
+
+    static long lockStart(Context c) { return p(c).getLong("lockStart", 0); }
+
+    static void setLockStart(Context c, long t) { p(c).edit().putLong("lockStart", t).apply(); }
+
+    private static int dayKey(int offset) {
+        Calendar cal = Calendar.getInstance();
+        cal.add(Calendar.DAY_OF_YEAR, offset);
+        return cal.get(Calendar.YEAR) * 10000 + (cal.get(Calendar.MONTH) + 1) * 100
+                + cal.get(Calendar.DAY_OF_MONTH);
+    }
+
+    /** 집중 시간을 오늘 기록에 더하고 연속 일수를 갱신한다. */
+    static void addFocus(Context c, int minutes) {
+        SharedPreferences sp = p(c);
+        int today = dayKey(0);
+        int total = sp.getInt("day", 0) == today ? sp.getInt("todayMin", 0) : 0;
+        int last = sp.getInt("lastDay", 0);
+        int streak = sp.getInt("streak", 0);
+        if (last != today) streak = last == dayKey(-1) ? streak + 1 : 1;
+        sp.edit().putInt("day", today).putInt("todayMin", total + minutes)
+                .putInt("lastDay", today).putInt("streak", streak).apply();
+    }
+
+    static int todayMinutes(Context c) {
+        return p(c).getInt("day", 0) == dayKey(0) ? p(c).getInt("todayMin", 0) : 0;
+    }
+
+    static int streak(Context c) {
+        int last = p(c).getInt("lastDay", 0);
+        return last == dayKey(0) || last == dayKey(-1) ? p(c).getInt("streak", 0) : 0;
+    }
 
     static boolean locked(Context c) { return lockEnd(c) > System.currentTimeMillis(); }
 
