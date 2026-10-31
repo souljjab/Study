@@ -1,11 +1,28 @@
 # 공부 집중 사이트 차단기
 
-hosts 파일로 유튜브·SNS·커뮤니티 등 딴짓 사이트를 차단합니다.
+hosts 파일(Windows)과 VPN·접근성(안드로이드)으로 유튜브·SNS·커뮤니티 등 딴짓 사이트를 차단합니다.
 
-- 실행: `dist/StudyBlocker.exe` 더블클릭 (관리자 권한 요청창에서 "예")
-- 집중 모드: 시간을 정하면 그 시간 동안 해제 불가, 창을 닫아도 차단 유지·재실행 시 이어짐
-- 차단 목록은 exe 옆 `sites.txt`에서 수정하거나 메뉴에서 추가/삭제
-- 재빌드: `cd blocker && GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o ../dist/StudyBlocker.exe .`
+## Windows — 몰입 (`dist/StudyBlocker.exe`)
+
+첨부 디자인(Nocturne)을 그대로 쓴 창 프로그램입니다. 화면은 Windows에 내장된 WebView2로 그리고, 타이머·차단은 Go로 동작합니다.
+
+- 실행: `dist/StudyBlocker.exe` 더블클릭 → 관리자 권한 확인에서 "예" (hosts 파일을 고치려면 필요)
+- 처음 실행하면 온보딩: 막을 카테고리 → 타이머 방식 → 첫 집중 시작
+- **집중**: 뽀모도로(25/5분, 4세션마다 긴 휴식) · 자유(25분~2시간) · 스톱워치. 타이머를 시작하면 집중 모드가 켜져 차단, 휴식 중엔 잠시 해제(설정에서 변경)
+- **차단 목록**: 목록 프리셋(기본·시험 기간·코딩, 새로 추가 가능), 카테고리 6종(SNS·영상·커뮤니티·쇼핑·뉴스·게임) 일괄 차단, 사이트 직접 추가, 허용 목록
+- **기록**: 오늘·이번 주 집중 시간, 7일 막대그래프, 가장 많이 막은 사이트, 오늘의 세션
+- **설정**: 타이머 길이, 해제 방식(바로 해제 / 15초 대기 후 해제 / 타이머 도는 동안 잠금), 차단 화면 문구, 컴퓨터 시작 시 실행, 알림음
+- 차단된 사이트에 접속하면 몰입 창이 앞으로 나와 차단 화면을 보여 주고, '막은 접속 시도'로 집계
+- 창을 닫으면 트레이(작업 표시줄 오른쪽)에서 계속 실행. 완전히 끝내려면 트레이 아이콘 우클릭 → 종료 (끝내면 차단이 풀림)
+- 상태 저장 위치: `%APPDATA%\Mollip\state.json` — 프로그램이 꺼져 있던 동안 흐른 시간도 다시 켜면 반영
+- 재빌드: `cd blocker && GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H windowsgui" -o ../dist/StudyBlocker.exe .`
+- 화면 개발: `cd blocker && STUDY_HOSTS=/tmp/hosts go run . -demo` → http://127.0.0.1:8765
+
+| 집중 | 차단 목록 | 기록 |
+|---|---|---|
+| ![](docs/screenshots/windows-focus.png) | ![](docs/screenshots/windows-list.png) | ![](docs/screenshots/windows-stats.png) |
+| **설정** | **해제 대기 대화상자** | **차단 화면** |
+| ![](docs/screenshots/windows-settings.png) | ![](docs/screenshots/windows-dialog.png) | ![](docs/screenshots/windows-blocked_real.png) |
 
 ## 안드로이드 (APK)
 

@@ -1,0 +1,17 @@
+/* 앱 전용 보정. 색·간격·모서리는 모두 styles.css(Nocturne) 토큰을 쓴다. */
+:root {
+  /* Inter에 한글이 없으므로 Windows 한글 글꼴로 이어 준다. */
+  --font-heading: "Inter", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --font-body: "Inter", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+}
+html, body { margin: 0; background: var(--color-bg); }
+a { color: var(--color-accent); }
+a:hover { color: var(--color-accent-300); }
+body { user-select: none; overflow-y: scroll; }
+input, textarea, select { user-select: text; }
+.title-input:hover { border-color: var(--color-divider) !important; }
+.title-input:focus { border-color: var(--color-accent) !important; outline: none; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--color-neutral-800); border-radius: var(--radius-md); border: 2px solid var(--color-bg); }
+::-webkit-scrollbar-track { background: transparent; }
+button:disabled { opacity: .45; cursor: default; }
