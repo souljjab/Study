@@ -30,8 +30,7 @@ class ScreenshotTest {
         manual = manual,
         lockStart = now - 20 * 60_000L,
         lockEnd = if (locked) now + (29 * 60 + 47) * 1000L else 0,
-        vpnOk = setupDone,
-        accOk = setupDone,
+        perms = Perms(vpn = setupDone, acc = setupDone, battery = setupDone),
         todayMin = if (locked) 100 else 50,
         streak = 3,
         sites = sites,
@@ -48,9 +47,9 @@ class ScreenshotTest {
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Header(s, pal)
+            Header(s, pal) {}
+            if (!s.perms.requiredDone) PermBanner(s.perms, pal) {}
             TimerBlock(s, pal, 50)
-            if (!s.vpnOk || !s.accOk) Checklist(s, pal, {}, {})
             Presets(50, "", pal, {}, {})
             SharpButton(if (s.locked) "+50분 연장" else "집중 시작", pal) {}
             SharpButton(if (s.manual) "수동 차단 해제" else "지금 바로 차단 (수동)", pal, filled = false, enabled = !s.locked) {}
@@ -68,6 +67,19 @@ class ScreenshotTest {
 
     @Test
     fun manual() = paparazzi.snapshot { StudyTheme { Screen(state(manual = true)) } }
+
+    @Test
+    fun permissions() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_5.copy(screenHeight = 3200))
+        paparazzi.snapshot {
+        StudyTheme {
+            PermissionScreen(
+                Perms(vpn = true, acc = false, battery = false), palette(Mode.OFF, false),
+                showRestrictedHelp = true, {}, {}, {}, {}, {}, {},
+            )
+        }
+        }
+    }
 
     @Test
     fun blocked() = paparazzi.snapshot { StudyTheme { BlockedScreen("YouTube", System.currentTimeMillis() + (29 * 60 + 30) * 1000L) {} } }

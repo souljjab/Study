@@ -18,6 +18,21 @@ hosts 파일로 유튜브·SNS·커뮤니티 등 딴짓 사이트를 차단합�
   (서명 키는 `android/keystore/`에 포함돼 있어 어디서 빌드해도 기존 앱 위에 업데이트 설치됨)
 - 화면 스크린샷 갱신: `./gradlew recordPaparazziDebug`
 
-| 꺼짐(처음 실행) | 집중 중 | 수동 차단 | 차단 화면 |
+### 필요한 권한
+
+앱을 처음 열면 권한 설정 화면이 뜹니다. 나중에는 메인 화면 오른쪽 위 **[권한]** 버튼으로 다시 열 수 있습니다.
+
+| 권한 | 구분 | 용도 | 허용 방법 |
 |---|---|---|---|
-| ![](docs/screenshots/off_firstRun.png) | ![](docs/screenshots/focus.png) | ![](docs/screenshots/manual.png) | ![](docs/screenshots/blocked.png) |
+| VPN 연결 | 필수 | 웹사이트 차단 (기기 안에서 DNS 요청만 걸러냄) | [허용] → 시스템 창에서 확인 |
+| 접근성 | 필수 | 앱 차단 (열린 앱 이름만 확인, 화면 내용은 읽지 않음) | [설정 열기] → '공부 집중 차단기' 켜기 |
+| 배터리 최적화 제외 | 권장 | 절전 중에 차단이 꺼지지 않게 함 | [허용] → 시스템 창에서 허용 |
+| 항상 켜진 VPN | 선택 | 재부팅·강제 종료 후에도 차단 자동 재시작 | [VPN 설정 열기] → ⚙ → '항상 켜진 VPN' |
+| 인터넷 / 부팅 완료 / 앱 목록 보기 | 자동 | 주소 전달 / 재부팅 후 이어가기 / 차단할 앱 고르기 | 설치 시 자동 허용 |
+
+> 안드로이드 13 이상에서 접근성 스위치가 회색으로 잠겨 있으면: 권한 화면의 **[앱 정보 열기]** → 오른쪽 위 ⋮ → **'제한된 설정 허용'** → 다시 접근성에서 켜기.
+> (파일로 직접 설치한 앱에 안드로이드가 거는 보안 제한입니다.)
+
+| 꺼짐(처음 실행) | 집중 중 | 수동 차단 | 차단 화면 | 권한 설정 |
+|---|---|---|---|---|
+| ![](docs/screenshots/off_firstRun.png) | ![](docs/screenshots/focus.png) | ![](docs/screenshots/manual.png) | ![](docs/screenshots/blocked.png) | ![](docs/screenshots/permissions.png) |

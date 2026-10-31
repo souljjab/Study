@@ -5,9 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -90,8 +90,7 @@ internal data class UiState(
     val manual: Boolean,
     val lockStart: Long,
     val lockEnd: Long,
-    val vpnOk: Boolean,
-    val accOk: Boolean,
+    val perms: Perms,
     val todayMin: Int,
     val streak: Int,
     val sites: List<String>,
@@ -111,8 +110,7 @@ internal fun readState(c: Context) = UiState(
     manual = Store.manual(c),
     lockStart = Store.lockStart(c),
     lockEnd = Store.lockEnd(c),
-    vpnOk = VpnService.prepare(c) == null,
-    accOk = AppGuardService.isEnabled(c),
+    perms = readPerms(c),
     todayMin = Store.todayMinutes(c),
     streak = Store.streak(c),
     sites = Store.sites(c),
@@ -215,6 +213,23 @@ internal fun MainScreen() {
         }
     }
 
+    // 필수 권한이 없으면 처음에 권한 화면부터 보여 준다.
+    var showPerms by rememberSaveable { mutableStateOf(!s.perms.requiredDone) }
+    if (showPerms) {
+        BackHandler { showPerms = false }
+        PermissionScreen(
+            s.perms, pal,
+            showRestrictedHelp = restrictedSettingsOs,
+            onVpn = { withVpn {} },
+            onAcc = { openAccessibilitySettings(ctx) },
+            onAppInfo = { openAppInfo(ctx) },
+            onBattery = { requestBatteryExemption(ctx) },
+            onAlwaysOn = { openVpnSettings(ctx) },
+            onDone = { showPerms = false },
+        )
+        return
+    }
+
     LazyColumn(
         Modifier
             .fillMaxSize()
@@ -224,17 +239,9 @@ internal fun MainScreen() {
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item { Header(s, pal) }
+        item { Header(s, pal) { showPerms = true } }
+        if (!s.perms.requiredDone) item { PermBanner(s.perms, pal) { showPerms = true } }
         item { TimerBlock(s, pal, minutes) }
-        if (!s.vpnOk || !s.accOk) {
-            item {
-                Checklist(
-                    s, pal,
-                    onVpn = { withVpn {} },
-                    onAcc = { ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                )
-            }
-        }
         item {
             Presets(preset, custom, pal, onPreset = { preset = it }, onCustom = { custom = it })
         }
@@ -346,7 +353,7 @@ internal fun MainScreen() {
 }
 
 @Composable
-internal fun Header(s: UiState, pal: Palette) {
+internal fun Header(s: UiState, pal: Palette, onPerms: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Label("Study Block", pal)
@@ -357,6 +364,15 @@ internal fun Header(s: UiState, pal: Palette) {
             Mode.MANUAL -> "BLOCK"
             Mode.OFF -> "OFF"
         }
+        Box(
+            Modifier
+                .border(2.dp, pal.fg)
+                .clickable(onClick = onPerms)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Text("권한", color = pal.fg, fontWeight = FontWeight.Black, fontSize = 12.sp)
+        }
+        Spacer(Modifier.width(8.dp))
         Box(
             Modifier
                 .border(2.dp, pal.fg)
@@ -411,58 +427,6 @@ internal fun TimerBlock(s: UiState, pal: Palette, minutes: Int) {
                     color = pal.muted,
                     fontWeight = FontWeight.Bold,
                 )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun Checklist(s: UiState, pal: Palette, onVpn: () -> Unit, onAcc: () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .border(2.dp, pal.fg)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Label("처음 설정", pal)
-        CheckRow("웹 차단", "VPN 권한 허용", s.vpnOk, "허용", pal, onVpn)
-        CheckRow("앱 차단", "접근성에서 '공부 집중 차단기' 켜기", s.accOk, "켜기", pal, onAcc)
-    }
-}
-
-@Composable
-internal fun CheckRow(
-    title: String,
-    sub: String,
-    done: Boolean,
-    action: String,
-    pal: Palette,
-    onClick: () -> Unit,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier
-                .size(24.dp)
-                .border(2.dp, pal.fg)
-                .background(if (done) pal.fg else Color.Transparent),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (done) Text("✓", color = pal.bg, fontWeight = FontWeight.Black, fontSize = 14.sp)
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = pal.fg, fontWeight = FontWeight.Bold)
-            Text(sub, color = pal.muted, fontSize = 12.sp)
-        }
-        if (!done) {
-            Box(
-                Modifier
-                    .background(pal.accent)
-                    .clickable(onClick = onClick)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-            ) {
-                Text(action, color = pal.onAccent, fontWeight = FontWeight.Black)
             }
         }
     }
