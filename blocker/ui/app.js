@@ -36,13 +36,13 @@ function Switch({ on, onClick, label, big }) {
 }
 
 // 목록 이름: 입력 중엔 로컬, 포커스를 잃거나 Enter면 저장
-function TitleInput({ value, onCommit }) {
+function TitleInput({ value, onCommit, size = 28, maxWidth = 420 }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
   return html`<input class="title-input" value=${v} onInput=${(e) => setV(e.target.value)}
     onBlur=${() => v.trim() && v !== value && onCommit(v)} onKeyDown=${(e) => e.key === 'Enter' && e.target.blur()}
     aria-label="목록 이름"
-    style="font-family:var(--font-heading);font-weight:500;font-size:28px;letter-spacing:-0.015em;color:var(--color-text);background:transparent;border:1px solid transparent;border-radius:var(--radius-md);padding:0 var(--space-2);margin-left:calc(var(--space-2) * -1);width:100%;max-width:420px;" />`;
+    style=${`font-family:var(--font-heading);font-weight:500;font-size:${size}px;letter-spacing:-0.015em;color:var(--color-text);background:transparent;border:1px solid transparent;border-radius:var(--radius-md);padding:0 var(--space-2);margin-left:calc(var(--space-2) * -1);width:100%;max-width:${maxWidth}px;`} />`;
 }
 
 function App() {
@@ -63,6 +63,8 @@ function App() {
   const [obCats, setObCats] = useState(['SNS', '영상', '커뮤니티']);
   const [obMode, setObMode] = useState('pomo');
   const [blockPage, setBlockPage] = useState(null); // { domain, preview }
+  const [schedError, setSchedError] = useState('');
+  const [rev, setRev] = useState(0); // 대화상자 취소 시 시간 입력칸을 되돌리려고 다시 그린다
   const seenOnboard = useRef(false);
 
   const apply = (r) => { if (r && r.state) setS(r.state); return r; };
@@ -130,7 +132,7 @@ function App() {
   // 디자인의 guard: 정책에 따라 바로 실행 / 대기 후 실행 / 잠금 안내
   function guard(title, body, fn) {
     if (!enf || st.policy === 'instant') return fn();
-    const locked = st.policy === 'lock' && t.running;
+    const locked = S.locked;
     pending.current = fn;
     setDialog({ title, body, locked, count: locked ? 0 : st.waitSec, total: st.waitSec });
   }
@@ -142,7 +144,7 @@ function App() {
       const s = cur?.settings;
       const fn = () => act('quit');
       if (!cur?.enforcing || s.policy === 'instant') return fn();
-      const locked = s.policy === 'lock' && cur.timer.running;
+      const locked = cur.locked;
       pending.current = fn;
       setDialog({ title: '프로그램을 끝낼까요?', body: '끝내면 모든 차단이 풀려요.', locked, count: locked ? 0 : s.waitSec, total: s.waitSec });
     }
@@ -172,22 +174,22 @@ function App() {
   function toggleCat(p, c) {
     const on = p.cats.includes(c);
     const fn = () => act('toggleCat', { pid: p.id, cat: c });
-    if (!on || p.id !== S.activePreset) return fn();
+    if (!on || !S.enforcedPresets.includes(p.id)) return fn();
     guard(`${c} 차단 해제`, `${CAT_INFO[c].n}개 사이트에 바로 접속할 수 있게 돼요.`, fn);
   }
   function toggleSite(p, x) {
     const fn = () => act('toggleSite', { pid: p.id, id: x.id });
-    if (!x.blocked || p.id !== S.activePreset) return fn();
+    if (!x.blocked || !S.enforcedPresets.includes(p.id)) return fn();
     guard(`${x.domain} 차단 해제`, '해제하면 이 사이트에 바로 접속할 수 있어요.', fn);
   }
   function removeSite(p, x) {
     const fn = () => act('removeSite', { pid: p.id, id: x.id });
-    if (!x.blocked || p.id !== S.activePreset) return fn();
+    if (!x.blocked || !S.enforcedPresets.includes(p.id)) return fn();
     guard(`${x.domain} 삭제`, '차단 중인 사이트예요. 지우면 바로 접속할 수 있어요.', fn);
   }
   function setAll(v) {
     const fn = () => act('setAll', { pid: viewP.id, on: v });
-    if (v || viewP.id !== S.activePreset) return fn();
+    if (v || !S.enforcedPresets.includes(viewP.id)) return fn();
     guard('모두 해제할까요?', '이 목록의 카테고리와 사이트 차단이 한꺼번에 풀려요.', fn);
   }
   async function addSite() {
@@ -199,7 +201,7 @@ function App() {
       const r = await act('addAllow', { pid: viewP.id, domain: newAllow }, setAllowError);
       if (r && !r.error) { setNewAllow(''); setAllowError(''); }
     };
-    if (viewP.id !== S.activePreset) return fn();
+    if (!S.enforcedPresets.includes(viewP.id)) return fn();
     guard(`${newAllow.trim() || '주소'} 허용`, '허용 목록에 추가하면 집중 중에도 열려요.', fn);
   }
   async function addPreset() {
@@ -212,6 +214,15 @@ function App() {
     guard('적용할 목록을 바꿀까요?', '목록을 바꾸면 지금 막고 있던 일부 사이트가 풀릴 수 있어요.', fn);
   }
   const setSetting = (patch) => act('settings', { patch });
+  // ── 예약 ──
+  const schedGuard = (sc, title, body, fn) => (sc.active ? guard(title, body, fn) : fn());
+  const addSchedule = (tpl = {}) => act('addSchedule', { name: tpl.name || '', sched: tpl.name ? { days: tpl.days, start: tpl.start, end: tpl.end } : null }, setSchedError).then((r) => r && !r.error && setSchedError(''));
+  function updateSchedule(sc, patch, harmless) {
+    const fn = () => act('updateSchedule', { id: sc.id, sched: patch }, setSchedError).then((r) => r && !r.error && setSchedError(''));
+    if (harmless) return fn();
+    schedGuard(sc, '예약을 바꿀까요?', '지금 적용 중인 예약이에요. 바꾸면 일부 차단이 바로 풀릴 수 있어요.', fn);
+  }
+  const removeSchedule = (sc) => schedGuard(sc, `${sc.name} 삭제`, '지금 적용 중인 예약이에요. 지우면 바로 풀려요.', () => act('removeSchedule', { id: sc.id }));
   function finishOnboarding() {
     act('finishOnboarding', { cats: obCats, mode: obMode, start: true });
     setOnboarding(false); setObStep(0); setView('focus');
@@ -236,10 +247,17 @@ function App() {
     bg: view === key ? 'var(--color-accent-900)' : 'transparent',
     color: view === key ? 'var(--color-accent-200)' : 'var(--color-neutral-400)',
   });
-  const nav = [navItem('focus', '집중', 'ph-timer'), navItem('list', '차단 목록', 'ph-list-checks', String(S.presets.length)), navItem('stats', '기록', 'ph-chart-bar'), navItem('settings', '설정', 'ph-gear-six')];
-  const sideStatus = S.focusOn ? (enf ? '집중 모드 켜짐' : '휴식 중 · 차단 해제') : '집중 모드 꺼짐';
+  const activeScheds = S.schedules.filter((x) => x.active);
+  const schedEnd = activeScheds.map((x) => x.end).sort().pop();
+  const rankNext = (n) => (n.startsWith('오늘') ? '0' : n.startsWith('내일') ? '1' : '2') + n.slice(-5);
+  const upcoming = S.schedules.filter((x) => x.next).sort((a, b) => rankNext(a.next).localeCompare(rankNext(b.next)))[0];
+  const schedSummary = activeScheds.length ? `지금 차단 중 · ${schedEnd}까지` : upcoming ? `다음 · ${upcoming.next}` : '없음';
+  const nav = [navItem('focus', '집중', 'ph-timer'), navItem('list', '차단 목록', 'ph-list-checks', String(S.presets.length)), navItem('schedule', '예약', 'ph-calendar-check', S.schedules.length ? String(S.schedules.length) : ''), navItem('stats', '기록', 'ph-chart-bar'), navItem('settings', '설정', 'ph-gear-six')];
+  const sideStatus = S.focusOn ? (enf ? '집중 모드 켜짐' : '휴식 중 · 차단 해제') : activeScheds.length ? '예약 차단 중' : '집중 모드 꺼짐';
   const sideTime = isWatch ? (t.elapsed ? fmt(t.elapsed) : '—') : (t.running || t.remaining < t.total ? fmt(t.remaining) : '—');
-  const sideMeta = enf ? `${active.name} · ${blocked}개 차단 중` : `${active.name} · ${blocked}개 대기`;
+  const sideMeta = !S.focusOn && activeScheds.length
+    ? `${activeScheds[0].name} · ${schedEnd}까지`
+    : enf ? `${active.name} · ${blocked}개 차단 중` : `${active.name} · ${blocked}개 대기`;
   const dotColor = enf ? 'var(--color-accent)' : 'var(--color-neutral-600)';
   const todayLabel = `${now.getMonth() + 1}월 ${now.getDate()}일 ${DAYS[now.getDay()]}요일`;
   const totalSessions = S.sessions.length;
@@ -251,7 +269,9 @@ function App() {
   const timeVal = isWatch ? t.elapsed : t.remaining;
   const focusDesc = S.focusOn
     ? (enf ? `${blocked}개 사이트를 막고 있어요. 끄면 바로 모두 풀려요.` : '휴식 시간이라 차단이 잠시 풀렸어요.')
-    : '타이머를 시작하면 자동으로 켜져요. 지금 바로 켜서 직접 차단할 수도 있어요.';
+    : activeScheds.length
+      ? `${activeScheds[0].name} 예약으로 차단 중이에요. ${schedEnd}에 저절로 풀려요.`
+      : '타이머를 시작하면 자동으로 켜져요. 지금 바로 켜서 직접 차단할 수도 있어요.';
   const catCard = (p) => (c) => {
     const on = p.cats.includes(c);
     return { name: c, ...CAT_INFO[c], ...tile(on), on, state: on ? '차단' : '허용', toggle: () => toggleCat(p, c) };
@@ -356,6 +376,10 @@ function App() {
               <span style="flex:1;">휴식 시간</span>
               <span class="text-muted">${st.breakUnblock ? '차단 해제' : '차단 유지'}</span>
             </div>
+            <div style="display:flex;align-items:center;gap:var(--space-3);font-size:13px;">
+              <span style="flex:1;">예약 차단</span>
+              <button class="btn btn-ghost" onClick=${() => setView('schedule')} style=${`font-size:13px;padding:0 var(--space-1);min-height:0;color:${activeScheds.length ? 'var(--color-accent-300)' : 'var(--color-neutral-400)'};`}>${schedSummary} <i class="ph ph-arrow-right"></i></button>
+            </div>
           </div>
         </section>
 
@@ -396,6 +420,7 @@ function App() {
         <${TitleInput} value=${viewP.name} onCommit=${(v) => act('renamePreset', { pid: viewP.id, name: v })} />
       </div>
       <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;">
+        ${S.schedules.some((x) => x.active && x.presetId === viewP.id) && html`<span class="tag tag-accent" style="align-self:center;">예약 적용 중</span>`}
         ${viewP.id === S.activePreset
           ? html`<span class="tag tag-accent" style="align-self:center;">집중 모드에 적용 중</span>`
           : html`<button class="btn btn-secondary" onClick=${() => setActive(viewP.id)}><i class="ph ph-check"></i>이 목록 사용</button>
@@ -446,7 +471,7 @@ function App() {
         <thead><tr><th>사이트</th><th>분류</th><th>상태</th><th style="width:80px;">차단</th><th style="width:48px;"></th></tr></thead>
         <tbody>
           ${visible.map((x) => {
-            const e = enf && viewP.id === S.activePreset;
+            const e = S.enforcedPresets.includes(viewP.id);
             return html`
             <tr>
               <td><div style="display:flex;align-items:center;gap:var(--space-3);">
@@ -488,6 +513,92 @@ function App() {
             </tr>`)}
         </tbody>
       </table>`}`;
+
+  const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+  const TEMPLATES = [
+    { name: '평일 오전', days: [1, 2, 3, 4, 5], start: '09:00', end: '12:00', icon: 'ph-sun-horizon', ex: '월–금 · 09:00–12:00' },
+    { name: '평일 저녁 공부', days: [1, 2, 3, 4, 5], start: '19:00', end: '22:00', icon: 'ph-books', ex: '월–금 · 19:00–22:00' },
+    { name: '매일 밤', days: [0, 1, 2, 3, 4, 5, 6], start: '23:00', end: '07:00', icon: 'ph-moon', ex: '매일 · 23:00–다음 날 07:00' },
+  ];
+  const policyName = { instant: '바로 해제', wait: '대기 후 해제', lock: '잠금' }[st.policy];
+  const schedTag = (sc) => {
+    if (sc.active) return html`<span class="tag tag-accent">지금 차단 중 · ${sc.end}까지</span>`;
+    if (!sc.enabled) return html`<span class="tag" style="box-shadow:inset 0 0 0 1px var(--color-divider);color:var(--color-neutral-400);">꺼짐</span>`;
+    if (!sc.days.length) return html`<span class="tag tag-neutral">요일을 고르세요</span>`;
+    return html`<span class="tag tag-neutral">다음 · ${sc.next}</span>`;
+  };
+  const timeInput = (sc, key) => html`<input type="time" class="input" key=${`${sc.id}-${key}-${sc[key]}-${rev}`} value=${sc[key]}
+    onChange=${(e) => e.target.value && e.target.value !== sc[key] && updateSchedule(sc, { [key]: e.target.value })}
+    style="width:auto;min-height:36px;font-size:18px;font-variant-numeric:tabular-nums;color-scheme:dark;padding:2px 8px;" />`;
+  const scheduleCard = (sc) => {
+    const overnight = sc.end < sc.start;
+    return html`
+    <section class="card elev-sm" key=${sc.id} style=${`padding:var(--space-6);gap:var(--space-4);${sc.active ? 'box-shadow:0 0 0 1px var(--color-accent),0 0 24px var(--color-accent-900);background:radial-gradient(120% 90% at 0% 0%,var(--color-accent-900),var(--color-surface) 60%);' : ''}`}>
+      <div style="display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap;">
+        <i class=${`ph ${sc.active ? 'ph-shield-check' : 'ph-calendar-check'}`} style=${`font-size:20px;color:${sc.active ? 'var(--color-accent)' : 'var(--color-neutral-500)'};`}></i>
+        <div style="flex:1;min-width:160px;"><${TitleInput} size=${18} maxWidth=${280} value=${sc.name} onCommit=${(v) => updateSchedule(sc, { name: v }, true)} /></div>
+        ${schedTag(sc)}
+        <${Switch} on=${sc.enabled} label="예약 켜기" onClick=${() => (sc.enabled ? updateSchedule(sc, { enabled: false }) : updateSchedule(sc, { enabled: true }, true))} />
+        <button class="btn btn-ghost btn-icon" onClick=${() => removeSchedule(sc)} title="삭제" style="width:30px;height:30px;color:var(--color-neutral-500);"><i class="ph ph-trash" style="font-size:16px;"></i></button>
+      </div>
+      <div style=${`display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap;padding-top:var(--space-4);background:${fadeRule};`}>
+        <div style="display:flex;align-items:center;gap:var(--space-2);">
+          ${timeInput(sc, 'start')}
+          <span class="text-muted">–</span>
+          ${timeInput(sc, 'end')}
+          ${overnight && html`<span class="text-muted" style="font-size:12px;">다음 날</span>`}
+        </div>
+        <div style="display:flex;gap:var(--space-1);" role="group" aria-label="요일">
+          ${DAY_ORDER.map((d) => {
+            const on = sc.days.includes(d); const k = tile(on);
+            const next = on ? sc.days.filter((x) => x !== d) : [...sc.days, d];
+            return html`<button onClick=${() => updateSchedule(sc, { days: next }, !on)} aria-pressed=${on} style=${`width:32px;height:32px;border-radius:var(--radius-md);border:1px solid ${k.border};background:${k.bg};color:${k.color};font:inherit;font-size:13px;cursor:pointer;`}>${DAYS[d]}</button>`;
+          })}
+        </div>
+        <div style="display:flex;align-items:center;gap:var(--space-2);font-size:13px;margin-left:auto;">
+          <span class="text-muted">막을 목록</span>
+          <select class="input" key=${`${sc.id}-p-${sc.presetId}-${rev}`} value=${String(sc.presetId)} onChange=${(e) => updateSchedule(sc, { presetId: Number(e.target.value) })} style="width:auto;min-height:30px;padding:3px 8px;font-size:13px;">
+            ${S.presets.map((p) => html`<option value=${String(p.id)}>${p.name}</option>`)}
+          </select>
+        </div>
+      </div>
+    </section>`;
+  };
+  const templateTiles = html`
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--space-3);">
+      ${TEMPLATES.map((tp) => html`
+        <button onClick=${() => addSchedule(tp)} style="display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-2);padding:var(--space-4);border-radius:var(--radius-md);border:1px solid var(--color-divider);background:transparent;color:var(--color-neutral-300);font:inherit;cursor:pointer;text-align:left;">
+          <i class=${`ph ${tp.icon}`} style="font-size:20px;color:var(--color-accent);"></i>
+          <span style="font-size:14px;color:var(--color-text);">${tp.name}</span>
+          <span style="font-size:12px;opacity:.7;">${tp.ex}</span>
+        </button>`)}
+    </div>`;
+  const scheduleView = html`
+    <header style="display:flex;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-6);flex-wrap:wrap;">
+      <div style="flex:1;min-width:0;">
+        <div class="card-kicker" style="margin-bottom:var(--space-2);">자동 차단</div>
+        <h2 style="margin:0;font-size:28px;">예약</h2>
+      </div>
+      <button class="btn btn-primary" onClick=${() => addSchedule()}><i class="ph ph-plus"></i>새 예약</button>
+    </header>
+    <p class="text-muted" style="font-size:14px;max-width:640px;margin-bottom:var(--space-6);">정한 요일·시간이 되면 타이머 없이도 고른 목록으로 차단이 켜지고, 끝나면 저절로 풀려요. 집중 중 해제 방식(${policyName})이 예약에도 똑같이 적용돼요.</p>
+    ${!st.launch && html`
+      <div class="card" style="flex-direction:row;align-items:center;gap:var(--space-3);padding:var(--space-4);margin-bottom:var(--space-6);box-shadow:0 0 0 1px var(--color-divider);">
+        <i class="ph ph-info" style="font-size:18px;color:var(--color-accent);"></i>
+        <span style="flex:1;font-size:13px;">예약은 몰입이 실행 중일 때만 동작해요. '컴퓨터 시작 시 실행'을 켜 두는 게 좋아요.</span>
+        <button class="btn btn-secondary" onClick=${() => setSetting({ launch: true })}>켜기</button>
+      </div>`}
+    ${schedError && html`<div style="font-size:12px;color:var(--color-accent-300);margin-bottom:var(--space-3);">${schedError}</div>`}
+    ${S.schedules.length === 0
+      ? html`
+        <div style="display:flex;flex-direction:column;gap:var(--space-4);">
+          <div class="text-muted" style="font-size:14px;">아직 예약이 없어요. 자주 쓰는 시간대로 시작해 보세요.</div>
+          ${templateTiles}
+        </div>`
+      : html`
+        <div style="display:flex;flex-direction:column;gap:var(--space-4);margin-bottom:var(--space-8);">${S.schedules.map(scheduleCard)}</div>
+        <h6 class="text-muted" style="margin-bottom:var(--space-3);">빠른 추가</h6>
+        ${templateTiles}`}`;
 
   const statNums = [
     { label: '오늘 집중', value: dur(S.todayFocus) },
@@ -713,7 +824,7 @@ function App() {
     </div>`;
 
   const d = dialog;
-  const cancelDialog = () => { pending.current = null; setDialog(null); };
+  const cancelDialog = () => { pending.current = null; setDialog(null); setRev((r) => r + 1); };
   const confirmDialog = () => { const f = pending.current; pending.current = null; setDialog(null); f && f(); };
   const dialogView = d && html`
     <div class="dialog-backdrop" onClick=${cancelDialog} style="z-index:40;">
@@ -722,7 +833,7 @@ function App() {
           <i class=${`ph ${d.locked ? 'ph-lock-key' : 'ph-hourglass-medium'}`} style="font-size:22px;color:var(--color-accent);"></i>
           <div class="dialog-title">${d.locked ? '지금은 해제할 수 없어요' : d.title}</div>
         </div>
-        <div class="dialog-body">${d.locked ? `타이머가 끝날 때까지 차단이 잠겨 있어요. 남은 시간 ${fmt(timeVal)}.` : d.body}</div>
+        <div class="dialog-body">${d.locked ? (S.lockReason === 'schedule' ? `예약 시간이 끝날 때까지 차단이 잠겨 있어요. ${S.lockUntil}에 풀려요.` : `타이머가 끝날 때까지 차단이 잠겨 있어요. 남은 시간 ${fmt(timeVal)}.`) : d.body}</div>
         ${!d.locked && d.total > 0 && html`
           <div style="display:flex;flex-direction:column;gap:var(--space-2);">
             <div style="height:3px;border-radius:2px;background:var(--color-neutral-800);overflow:hidden;">
@@ -746,6 +857,7 @@ function App() {
         ${view === 'list' && listView}
         ${view === 'stats' && statsView}
         ${view === 'settings' && settingsView}
+        ${view === 'schedule' && scheduleView}
       </main>
     </div>
     ${blockPageView}

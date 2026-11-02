@@ -82,6 +82,7 @@ type Persist struct {
 	Sessions     []Session                 `json:"sessions"`
 	DayFocus     map[string]int            `json:"dayFocus"`
 	Hits         map[string]map[string]int `json:"hits"` // 날짜 → 도메인 → 막은 횟수
+	Schedules    []Schedule                `json:"schedules"`
 	NextID       int64                     `json:"nextId"`
 	SavedAt      int64                     `json:"savedAt"`
 }
@@ -125,13 +126,15 @@ type Engine struct {
 	// OnPhase는 집중/휴식이 바뀌거나 타이머가 끝날 때 불린다(알림음). 잠금 밖에서 호출된다.
 	OnPhase func(kind string)
 	events  []string
+	now     time.Time // 마지막으로 받은 현재 시각(예약 판단용)
+	schedK  string    // 직전 틱에 켜져 있던 예약
 }
 
 func dateKey(t time.Time) string { return t.Format("2006-01-02") }
 func hm(t time.Time) string      { return t.Format("15:04") }
 
 func NewEngine(path string, now time.Time) *Engine {
-	e := &Engine{path: path, st: defaultState(), lastTick: now}
+	e := &Engine{path: path, st: defaultState(), lastTick: now, now: now}
 	if path != "" {
 		if b, err := os.ReadFile(path); err == nil {
 			var p Persist
@@ -210,6 +213,11 @@ func (e *Engine) Tick(now time.Time) {
 		e.lastTick = e.lastTick.Add(time.Second)
 		e.tickOnce(e.lastTick)
 	}
+	e.now = now
+	if k := e.scheduleKey(); k != e.schedK {
+		e.schedEvents(e.schedK, k)
+		e.schedK = k
+	}
 	ev := e.events
 	e.events = nil
 	if len(ev) > 0 {
@@ -280,14 +288,52 @@ func (e *Engine) tickOnce(at time.Time) {
 	e.events = append(e.events, "done")
 }
 
-func (e *Engine) enforcing() bool {
+// focusEnforcing은 집중 모드(타이머/수동)로 차단 중인지다. 뽀모도로 휴식엔 풀릴 수 있다.
+func (e *Engine) focusEnforcing() bool {
 	t := e.st.Timer
 	return e.st.FocusOn && !(t.Phase == "break" && e.st.Settings.BreakUnblock && t.Mode == "pomo")
 }
 
+// enforcing은 집중 모드든 예약이든 지금 무언가를 막고 있는지다.
+func (e *Engine) enforcing() bool {
+	return e.focusEnforcing() || len(e.activeSchedules()) > 0
+}
+
+// lockedFocus는 '잠금' 정책에서 타이머가 도는 동안이다.
+func (e *Engine) lockedFocus() bool {
+	return e.focusEnforcing() && e.st.Settings.Policy == "lock" && e.st.Timer.Running
+}
+
+// lockedSchedule은 '잠금' 정책에서 예약 시간대 안인 동안이다.
+func (e *Engine) lockedSchedule() bool {
+	return e.st.Settings.Policy == "lock" && len(e.activeSchedules()) > 0
+}
+
 // locked는 '잠금' 정책이 적용 중이라 차단을 풀 수 없는 상태다.
-func (e *Engine) locked() bool {
-	return e.enforcing() && e.st.Settings.Policy == "lock" && e.st.Timer.Running
+func (e *Engine) locked() bool { return e.lockedFocus() || e.lockedSchedule() }
+
+// presetEnforced는 이 목록이 지금 차단에 쓰이는지다(집중 모드의 목록이거나 켜진 예약의 목록).
+func (e *Engine) presetEnforced(id int64) bool {
+	if e.focusEnforcing() && id == e.active().ID {
+		return true
+	}
+	for _, s := range e.activeSchedules() {
+		if s.PresetID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) schedEvents(prev, cur string) {
+	for _, s := range e.activeSchedules() {
+		if !strings.Contains(","+prev, fmt.Sprintf(",%d,", s.ID)) {
+			e.events = append(e.events, "schedStart|"+s.Name+"|"+s.End)
+		}
+	}
+	if cur == "" && prev != "" {
+		e.events = append(e.events, "schedEnd")
+	}
 }
 
 func (e *Engine) preset(id int64) *Preset {
@@ -310,10 +356,26 @@ func (e *Engine) active() *Preset {
 func (e *Engine) BlockedDomains() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if !e.enforcing() {
+	set := map[string]bool{}
+	if e.focusEnforcing() {
+		for _, d := range presetDomains(e.active()) {
+			set[d] = true
+		}
+	}
+	for _, s := range e.activeSchedules() {
+		for _, d := range presetDomains(e.preset(s.PresetID)) {
+			set[d] = true
+		}
+	}
+	if len(set) == 0 {
 		return nil
 	}
-	return presetDomains(e.active())
+	out := make([]string, 0, len(set))
+	for d := range set {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func presetDomains(p *Preset) []string {
@@ -388,6 +450,7 @@ type payload struct {
 	On     bool            `json:"on"`
 	Start  bool            `json:"start"`
 	Patch  json.RawMessage `json:"patch"`
+	Sched  *schedulePatch  `json:"sched"`
 }
 
 // Do는 UI 동작을 처리한다. 반환 에러 메시지는 UI에 그대로 보인다.
@@ -400,6 +463,7 @@ func (e *Engine) Do(action string, raw []byte, now time.Time) error {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.now = now
 	err := e.do(action, p, now)
 	if err == nil {
 		e.save(now)
@@ -444,7 +508,7 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 			t.SessionStart = hm(now)
 		}
 	case "reset":
-		if s.AutoLink && e.st.FocusOn && e.locked() {
+		if s.AutoLink && e.st.FocusOn && e.lockedFocus() {
 			return errLocked
 		}
 		if t.Mode == "watch" {
@@ -464,7 +528,7 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 			return nil
 		}
 		if t.Phase == "focus" {
-			if e.locked() {
+			if e.lockedFocus() {
 				return errLocked
 			}
 			b := s.BreakMin
@@ -482,7 +546,7 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 			e.st.FocusOn = true
 			return nil
 		}
-		if e.locked() {
+		if e.lockedFocus() {
 			return errLocked
 		}
 		e.st.FocusOn = false
@@ -493,7 +557,7 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 		if e.preset(p.Pid) == nil {
 			return nil
 		}
-		if p.Pid != e.st.ActivePreset && e.locked() {
+		if p.Pid != e.st.ActivePreset && e.lockedFocus() {
 			return errLocked
 		}
 		e.st.ActivePreset = p.Pid
@@ -504,7 +568,7 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 		}
 		for i, c := range pr.Cats {
 			if c == p.Cat {
-				if pr.ID == e.st.ActivePreset && e.locked() {
+				if e.presetEnforced(pr.ID) && e.locked() {
 					return errLocked
 				}
 				pr.Cats = append(pr.Cats[:i], pr.Cats[i+1:]...)
@@ -521,7 +585,7 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 			if pr.Sites[i].ID != p.ID {
 				continue
 			}
-			if pr.Sites[i].Blocked && pr.ID == e.st.ActivePreset && e.locked() {
+			if pr.Sites[i].Blocked && e.presetEnforced(pr.ID) && e.locked() {
 				return errLocked
 			}
 			if action == "removeSite" {
@@ -536,7 +600,7 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 		if pr == nil {
 			return nil
 		}
-		if !p.On && pr.ID == e.st.ActivePreset && e.locked() {
+		if !p.On && e.presetEnforced(pr.ID) && e.locked() {
 			return errLocked
 		}
 		if p.On {
@@ -584,7 +648,7 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 		if !validHost(d) {
 			return errors.New("올바른 주소를 입력하세요. 예: ko.wikipedia.org")
 		}
-		if pr.ID == e.st.ActivePreset && e.locked() {
+		if e.presetEnforced(pr.ID) && e.locked() {
 			return errLocked
 		}
 		for _, x := range pr.Allow {
@@ -619,6 +683,11 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 		if len(e.st.Presets) <= 1 || p.Pid == e.st.ActivePreset {
 			return errors.New("사용 중인 목록은 지울 수 없어요.")
 		}
+		for _, sc := range e.st.Schedules {
+			if sc.PresetID == p.Pid {
+				return errors.New("예약에서 쓰는 목록은 지울 수 없어요.")
+			}
+		}
 		for i := range e.st.Presets {
 			if e.st.Presets[i].ID == p.Pid {
 				e.st.Presets = append(e.st.Presets[:i], e.st.Presets[i+1:]...)
@@ -627,6 +696,8 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 		}
 	case "settings":
 		return e.applySettings(p.Patch)
+	case "addSchedule", "updateSchedule", "removeSchedule":
+		return e.doSchedule(action, p)
 	case "finishOnboarding":
 		e.st.Onboarded = true
 		if p.Cats == nil {
@@ -701,7 +772,7 @@ func (e *Engine) applySettings(raw json.RawMessage) error {
 		case "autoLink":
 			s.AutoLink = b
 		case "breakUnblock":
-			if b && e.locked() {
+			if b && e.lockedFocus() {
 				return errLocked
 			}
 			s.BreakUnblock = b
@@ -734,31 +805,56 @@ type topItem struct {
 
 // View는 UI에 보내는 상태 스냅숏이다.
 type View struct {
-	Onboarded    bool       `json:"onboarded"`
-	FocusOn      bool       `json:"focusOn"`
-	Enforcing    bool       `json:"enforcing"`
-	Locked       bool       `json:"locked"`
-	Timer        Timer      `json:"timer"`
-	Presets      []Preset   `json:"presets"`
-	ActivePreset int64      `json:"activePreset"`
-	Settings     Settings   `json:"settings"`
-	Cats         []*catInfo `json:"cats"`
-	Week         []int      `json:"week"` // 최근 7일 집중 분, 마지막이 오늘
-	TodayFocus   int        `json:"todayFocus"`
-	Sessions     []Session  `json:"sessions"` // 오늘
-	TodayHits    int        `json:"todayHits"`
-	Top          []topItem  `json:"top"`
-	Now          int64      `json:"now"`
+	Onboarded    bool           `json:"onboarded"`
+	FocusOn      bool           `json:"focusOn"`
+	Enforcing    bool           `json:"enforcing"`
+	Locked       bool           `json:"locked"`
+	LockReason   string         `json:"lockReason"` // timer | schedule
+	LockUntil    string         `json:"lockUntil"`
+	Schedules    []ScheduleView `json:"schedules"`
+	ActiveScheds []int64        `json:"activeSchedules"`
+	Enforced     []int64        `json:"enforcedPresets"`
+	Timer        Timer          `json:"timer"`
+	Presets      []Preset       `json:"presets"`
+	ActivePreset int64          `json:"activePreset"`
+	Settings     Settings       `json:"settings"`
+	Cats         []*catInfo     `json:"cats"`
+	Week         []int          `json:"week"` // 최근 7일 집중 분, 마지막이 오늘
+	TodayFocus   int            `json:"todayFocus"`
+	Sessions     []Session      `json:"sessions"` // 오늘
+	TodayHits    int            `json:"todayHits"`
+	Top          []topItem      `json:"top"`
+	Now          int64          `json:"now"`
 }
 
 func (e *Engine) View(now time.Time) View {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if now.After(e.now) {
+		e.now = now
+	}
 	today := dateKey(now)
 	v := View{
 		Onboarded: e.st.Onboarded, FocusOn: e.st.FocusOn, Enforcing: e.enforcing(), Locked: e.locked(),
 		Timer: e.st.Timer, ActivePreset: e.active().ID, Settings: e.st.Settings, Cats: catList(),
 		TodayFocus: e.st.DayFocus[today], Now: now.UnixMilli(), Sessions: []Session{}, Top: []topItem{},
+		Schedules: e.scheduleViews(), ActiveScheds: []int64{}, Enforced: []int64{},
+	}
+	if e.lockedFocus() {
+		v.LockReason = "timer"
+	} else if e.lockedSchedule() {
+		v.LockReason = "schedule"
+	}
+	for _, sc := range e.activeSchedules() {
+		v.ActiveScheds = append(v.ActiveScheds, sc.ID)
+		if v.LockUntil == "" || sc.End > v.LockUntil {
+			v.LockUntil = sc.End
+		}
+	}
+	for _, p := range e.st.Presets {
+		if e.presetEnforced(p.ID) {
+			v.Enforced = append(v.Enforced, p.ID)
+		}
 	}
 	b, _ := json.Marshal(e.st.Presets)
 	_ = json.Unmarshal(b, &v.Presets)
