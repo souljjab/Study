@@ -15,6 +15,8 @@ public class AppGuardService extends AccessibilityService {
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
         CharSequence pkg = e.getPackageName();
         if (pkg == null || !Store.shouldBlock(this)) return;
+        // 예약 시각에 백그라운드 시작이 막혔다면 여기서 웹 차단(VPN)을 다시 켠다.
+        ScheduleAlarm.ensureBlocking(this);
         if (Store.apps(this).contains(pkg.toString())) {
             String label = pkg.toString();
             try {

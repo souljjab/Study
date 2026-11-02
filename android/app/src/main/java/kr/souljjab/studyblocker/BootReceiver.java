@@ -9,6 +9,7 @@ import android.net.VpnService;
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
+        ScheduleAlarm.arm(ctx);
         if (!Store.shouldBlock(ctx) || VpnService.prepare(ctx) != null) return;
         try {
             ctx.startService(new Intent(ctx, BlockVpnService.class));

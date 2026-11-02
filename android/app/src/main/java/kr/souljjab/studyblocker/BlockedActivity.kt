@@ -34,7 +34,7 @@ class BlockedActivity : ComponentActivity() {
         enableEdgeToEdge()
         val label = intent.getStringExtra(EXTRA_LABEL) ?: "이 앱"
         onBackPressedDispatcher.addCallback(this) { goHome() }
-        setContent { StudyTheme { BlockedScreen(label, Store.lockEnd(this)) { goHome() } } }
+        setContent { StudyTheme { BlockedScreen(label, Store.blockEndMillis(this)) { goHome() } } }
     }
 
     private fun goHome() {

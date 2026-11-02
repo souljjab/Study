@@ -82,5 +82,39 @@ class ScreenshotTest {
     }
 
     @Test
+    fun schedule() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_5.copy(screenHeight = 2600))
+        // 화면 시계: 오늘 14:13, '오후 자습'(13:00–17:00)이 적용 중
+        val cal = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, 14); set(java.util.Calendar.MINUTE, 13); set(java.util.Calendar.SECOND, 0) }
+        val now = cal.timeInMillis
+        val morning = Schedule().apply { id = 1; name = "오후 자습"; days = 0x7F; start = 13 * 60; end = 17 * 60 }
+        val night = Schedule().apply { id = 2; name = "매일 밤"; days = 0x7F; start = 23 * 60; end = 7 * 60 }
+        val weekend = Schedule().apply { id = 3; name = "주말 오전"; days = 0x41; start = 9 * 60; end = 12 * 60; enabled = false }
+        val s = state().copy(
+            now = now,
+            schedules = listOf(morning, night, weekend), activeSched = morning,
+            schedStart = morning.activeStartMillis(cal), schedEnd = morning.activeEndMillis(cal),
+            schedNext = mapOf(2L to "오늘 23:00", 3L to ""),
+        )
+        val pal = palette(s.mode, false)
+        paparazzi.snapshot {
+            StudyTheme {
+                Column(
+                    Modifier.fillMaxSize().background(pal.bg).padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Header(s, pal) {}
+                    TimerBlock(s, pal, 50)
+                    Tabs(2, s, pal) {}
+                    ScheduleIntro(pal, {}, {})
+                    ScheduleRow(morning, true, "", s.schedEnd, pal, {}, {}, {})
+                    ScheduleRow(night, false, "오늘 23:00", 0, pal, {}, {}, {})
+                    ScheduleRow(weekend, false, "", 0, pal, {}, {}, {})
+                }
+            }
+        }
+    }
+
+    @Test
     fun blocked() = paparazzi.snapshot { StudyTheme { BlockedScreen("YouTube", System.currentTimeMillis() + (29 * 60 + 30) * 1000L) {} } }
 }

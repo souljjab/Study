@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
         if (Store.shouldBlock(this) && VpnService.prepare(this) == null) {
             startService(Intent(this, BlockVpnService::class.java))
         }
+        ScheduleAlarm.arm(this)
     }
 }
 
@@ -95,13 +96,22 @@ internal data class UiState(
     val streak: Int,
     val sites: List<String>,
     val apps: Set<String>,
+    val schedules: List<Schedule> = emptyList(),
+    val activeSched: Schedule? = null,
+    val schedStart: Long = 0,
+    val schedEnd: Long = 0,
+    val schedNext: Map<Long, String> = emptyMap(),
 ) {
     val mode: Mode
         get() = when {
             locked -> Mode.FOCUS
+            activeSched != null -> Mode.SCHEDULE
             manual -> Mode.MANUAL
             else -> Mode.OFF
         }
+
+    /** 집중 중이거나 예약 시간이면 목록에서 빼는 것을 막는다. */
+    val listLocked: Boolean get() = locked || activeSched != null
 }
 
 internal fun readState(c: Context) = UiState(
@@ -115,7 +125,18 @@ internal fun readState(c: Context) = UiState(
     streak = Store.streak(c),
     sites = Store.sites(c),
     apps = Store.apps(c),
-)
+).let { s ->
+    val now = java.util.Calendar.getInstance()
+    val list = Store.schedules(c)
+    val act = Store.activeSchedule(c)
+    s.copy(
+        schedules = list,
+        activeSched = act,
+        schedStart = act?.activeStartMillis(now) ?: 0,
+        schedEnd = act?.activeEndMillis(now) ?: 0,
+        schedNext = list.associate { it.id to it.nextLabel(now) },
+    )
+}
 
 internal class AppItem(val pkg: String, val label: String, val icon: ImageBitmap)
 
@@ -193,6 +214,8 @@ internal fun MainScreen() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var newSite by rememberSaveable { mutableStateOf("") }
     var toDelete by remember { mutableStateOf<String?>(null) }
+    var editing by remember { mutableStateOf<Pair<Schedule, Boolean>?>(null) } // 예약, 새로 만드는지
+    var schedDelete by remember { mutableStateOf<Schedule?>(null) }
     val apps by produceState(emptyList<AppItem>()) {
         value = withContext(Dispatchers.IO) { loadApps(ctx) }
     }
@@ -304,27 +327,84 @@ internal fun MainScreen() {
                 }
             }
             items(s.sites, key = { it }) { d ->
-                SiteRow(d, pal, deletable = !s.locked) { toDelete = d }
+                SiteRow(d, pal, deletable = !s.listLocked) { toDelete = d }
             }
-        } else {
+        } else if (tab == 1) {
             if (apps.isEmpty()) item { Text("앱 목록 불러오는 중…", color = pal.muted) }
             items(apps, key = { it.pkg }) { a ->
-                AppRow(a, a.pkg in s.apps, s.locked, pal) { on ->
+                AppRow(a, a.pkg in s.apps, s.listLocked, pal) { on ->
                     val set = HashSet(s.apps)
                     if (on) set.add(a.pkg) else set.remove(a.pkg)
                     Store.saveApps(ctx, set)
                     version++
                 }
             }
+        } else {
+            item {
+                ScheduleIntro(
+                    pal,
+                    onAdd = { editing = newSchedule(ctx) to true },
+                    onTemplate = { t -> withVpn { saveSchedule(ctx, newSchedule(ctx, t)); ScheduleAlarm.ensureBlocking(ctx) } },
+                )
+            }
+            if (s.schedules.isEmpty()) item { Text("아직 예약이 없어요.", color = pal.muted) }
+            items(s.schedules, key = { it.id }) { sc ->
+                val active = s.activeSched?.id == sc.id || (sc.activeAt(java.util.Calendar.getInstance()))
+                ScheduleRow(
+                    sc, active, s.schedNext[sc.id] ?: "", if (active) sc.activeEndMillis(java.util.Calendar.getInstance()) else 0, pal,
+                    onToggle = { on ->
+                        val next = sc.copy().also { it.enabled = on }
+                        if (!scheduleChangeAllowed(sc, next, active)) {
+                            toast(ctx, "적용 중인 예약은 끝날 때까지 끌 수 없어요")
+                        } else if (on) {
+                            withVpn { saveSchedule(ctx, next); ScheduleAlarm.ensureBlocking(ctx) }
+                        } else {
+                            saveSchedule(ctx, next)
+                            version++
+                        }
+                    },
+                    onEdit = { editing = sc.copy() to false },
+                    onDelete = { if (active) toast(ctx, "적용 중인 예약은 지울 수 없어요") else schedDelete = sc },
+                )
+            }
         }
         item {
             Text(
-                "집중 중에는 목록에서 빼거나 차단을 끌 수 없습니다. " +
+                "집중 중이거나 예약 시간에는 목록에서 빼거나 차단을 끌 수 없습니다. " +
                     "단, 휴대폰 설정에서 VPN·접근성 권한을 끄면 차단이 풀립니다.",
                 color = pal.muted,
                 fontSize = 12.sp,
             )
         }
+    }
+
+    editing?.let { (sc, isNew) ->
+        val old = s.schedules.firstOrNull { it.id == sc.id }
+        val active = old?.activeAt(java.util.Calendar.getInstance()) == true
+        ScheduleEditor(
+            sc, isNew, lockedTimes = active, pal = pal,
+            onSave = { next ->
+                if (!scheduleChangeAllowed(old, next, active)) {
+                    toast(ctx, "적용 중인 예약은 끝날 때까지 바꿀 수 없어요")
+                } else {
+                    editing = null
+                    withVpn { saveSchedule(ctx, next); ScheduleAlarm.ensureBlocking(ctx) }
+                }
+            },
+            onDismiss = { editing = null },
+        )
+    }
+    schedDelete?.let { sc ->
+        AlertDialog(
+            onDismissRequest = { schedDelete = null },
+            shape = RectangleShape,
+            title = { Text("예약 삭제") },
+            text = { Text("'${sc.name}' 예약을 지울까요?") },
+            confirmButton = {
+                TextButton(onClick = { deleteSchedule(ctx, sc.id); schedDelete = null; version++ }, shape = RectangleShape) { Text("삭제") }
+            },
+            dismissButton = { TextButton(onClick = { schedDelete = null }, shape = RectangleShape) { Text("취소") } },
+        )
     }
 
     toDelete?.let { d ->
@@ -362,6 +442,7 @@ internal fun Header(s: UiState, pal: Palette, onPerms: () -> Unit) {
         val tag = when (s.mode) {
             Mode.FOCUS -> "FOCUS"
             Mode.MANUAL -> "BLOCK"
+            Mode.SCHEDULE -> "AUTO"
             Mode.OFF -> "OFF"
         }
         Box(
@@ -413,6 +494,17 @@ internal fun TimerBlock(s: UiState, pal: Palette, minutes: Int) {
                 BigDigits(fmt(left / 1000), pal.fg)
                 Bar(left.toFloat() / total.coerceAtLeast(1), pal)
                 Text("딴짓 금지. 지금은 공부할 시간.", color = pal.fg, fontWeight = FontWeight.Bold)
+            }
+            Mode.SCHEDULE -> {
+                val left = s.schedEnd - s.now
+                Label("예약 차단", pal)
+                BigDigits(fmt(left / 1000), pal.fg)
+                Bar(left.toFloat() / (s.schedEnd - s.schedStart).coerceAtLeast(1), pal)
+                Text(
+                    "'${s.activeSched?.name}' 예약 · ${Schedule.hm(s.activeSched?.end ?: 0)}에 풀려요",
+                    color = pal.fg,
+                    fontWeight = FontWeight.Bold,
+                )
             }
             Mode.MANUAL -> {
                 Label("수동 차단", pal)
@@ -513,7 +605,7 @@ internal fun Tabs(tab: Int, s: UiState, pal: Palette, onTab: (Int) -> Unit) {
             .fillMaxWidth()
             .border(2.dp, pal.fg),
     ) {
-        listOf("사이트 ${s.sites.size}", "앱 ${s.apps.size}").forEachIndexed { i, t ->
+        listOf("사이트 ${s.sites.size}", "앱 ${s.apps.size}", "예약 ${s.schedules.size}").forEachIndexed { i, t ->
             val sel = i == tab
             Box(
                 Modifier

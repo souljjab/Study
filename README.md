@@ -32,6 +32,7 @@ hosts 파일(Windows)과 VPN·접근성(안드로이드)으로 유튜브·SNS·�
 - 설치: `dist/StudyBlocker.apk`를 폰으로 옮겨 설치 ("출처를 알 수 없는 앱 설치" 허용 필요)
 - 처음 차단을 켤 때 VPN 연결 요청이 뜨면 "확인" (DNS 질의만 처리하며, 다른 트래픽은 그대로 통과)
 - 앱 차단(유튜브·인스타 앱 등): 설정 > 접근성에서 '공부 집중 차단기'를 켜면, 차단 중 목록의 앱을 열 때 홈 화면으로 돌려보냄. '차단할 앱 선택'에서 앱 추가/삭제
+- 예약: '예약' 탭에서 요일·시간대를 정하면 앱을 열지 않아도 그 시간에 사이트·앱을 자동 차단(밤을 넘기는 시간대 가능, 템플릿: 평일 오전·평일 저녁·매일 밤). 적용 중인 예약은 끝날 때까지 끄거나 지우거나 시간을 바꿀 수 없음
 - 집중 모드/수동 차단/사이트 추가·삭제는 Windows 버전과 동일하게 동작
 - 차단 앱을 열면 '딴짓 금지' 전체 화면과 남은 시간이 뜸
 - 재빌드: `cd android && ./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
@@ -48,11 +49,11 @@ hosts 파일(Windows)과 VPN·접근성(안드로이드)으로 유튜브·SNS·�
 | 접근성 | 필수 | 앱 차단 (열린 앱 이름만 확인, 화면 내용은 읽지 않음) | [설정 열기] → '공부 집중 차단기' 켜기 |
 | 배터리 최적화 제외 | 권장 | 절전 중에 차단이 꺼지지 않게 함 | [허용] → 시스템 창에서 허용 |
 | 항상 켜진 VPN | 선택 | 재부팅·강제 종료 후에도 차단 자동 재시작 | [VPN 설정 열기] → ⚙ → '항상 켜진 VPN' |
-| 인터넷 / 부팅 완료 / 앱 목록 보기 | 자동 | 주소 전달 / 재부팅 후 이어가기 / 차단할 앱 고르기 | 설치 시 자동 허용 |
+| 인터넷 / 부팅 완료 / 앱 목록 보기 / 정확한 알람 | 자동 | 주소 전달 / 재부팅 후 이어가기 / 차단할 앱 고르기 / 예약 시각에 차단 켜기 | 설치 시 자동 허용 |
 
 > 안드로이드 13 이상에서 접근성 스위치가 회색으로 잠겨 있으면: 권한 화면의 **[앱 정보 열기]** → 오른쪽 위 ⋮ → **'제한된 설정 허용'** → 다시 접근성에서 켜기.
 > (파일로 직접 설치한 앱에 안드로이드가 거는 보안 제한입니다.)
 
-| 꺼짐(처음 실행) | 집중 중 | 수동 차단 | 차단 화면 | 권한 설정 |
-|---|---|---|---|---|
-| ![](docs/screenshots/off_firstRun.png) | ![](docs/screenshots/focus.png) | ![](docs/screenshots/manual.png) | ![](docs/screenshots/blocked.png) | ![](docs/screenshots/permissions.png) |
+| 꺼짐(처음 실행) | 집중 중 | 수동 차단 | 차단 화면 | 권한 설정 | 예약 |
+|---|---|---|---|---|---|
+| ![](docs/screenshots/off_firstRun.png) | ![](docs/screenshots/focus.png) | ![](docs/screenshots/manual.png) | ![](docs/screenshots/blocked.png) | ![](docs/screenshots/permissions.png) | ![](docs/screenshots/schedule.png) |

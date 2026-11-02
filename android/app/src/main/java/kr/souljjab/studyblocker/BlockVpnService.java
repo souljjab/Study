@@ -31,6 +31,8 @@ public class BlockVpnService extends VpnService {
     private final ExecutorService pool = Executors.newFixedThreadPool(8);
     private final Object writeLock = new Object();
     private volatile boolean running;
+    /** 다른 컴포넌트가 VPN이 떠 있는지 확인할 때 쓴다. */
+    static volatile boolean active;
     private ParcelFileDescriptor tun;
     private FileOutputStream tunOut;
 
@@ -74,6 +76,7 @@ public class BlockVpnService extends VpnService {
             running = true;
             final FileInputStream in = new FileInputStream(tun.getFileDescriptor());
             new Thread(() -> loop(in), "dns-loop").start();
+            active = true;
             return true;
         } catch (Exception e) {
             return false;
@@ -224,6 +227,7 @@ public class BlockVpnService extends VpnService {
 
     private void stopVpn() {
         running = false;
+        active = false;
         handler.removeCallbacks(check);
         synchronized (writeLock) {
             tunOut = null;

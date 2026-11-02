@@ -4,6 +4,9 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.util.ArrayList;
+import org.json.JSONArray;
+import org.json.JSONException;
+
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
@@ -131,5 +134,51 @@ final class Store {
 
     static boolean locked(Context c) { return lockEnd(c) > System.currentTimeMillis(); }
 
-    static boolean shouldBlock(Context c) { return manual(c) || locked(c); }
+    static boolean shouldBlock(Context c) { return manual(c) || locked(c) || activeSchedule(c) != null; }
+
+    // ── 예약 ──
+
+    static List<Schedule> schedules(Context c) {
+        List<Schedule> out = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(p(c).getString("schedules", "[]"));
+            for (int i = 0; i < a.length(); i++) out.add(Schedule.fromJson(a.getJSONObject(i)));
+        } catch (JSONException ignored) {
+        }
+        return out;
+    }
+
+    static void saveSchedules(Context c, List<Schedule> list) {
+        JSONArray a = new JSONArray();
+        try {
+            for (Schedule s : list) a.put(s.toJson());
+        } catch (JSONException ignored) {
+        }
+        p(c).edit().putString("schedules", a.toString()).commit();
+        ScheduleAlarm.arm(c);
+    }
+
+    static long nextScheduleId(Context c) {
+        long id = p(c).getLong("nextScheduleId", 1);
+        p(c).edit().putLong("nextScheduleId", id + 1).apply();
+        return id;
+    }
+
+    /** 지금 켜져 있는 예약(여럿이면 가장 늦게 끝나는 것). 없으면 null. */
+    static Schedule activeSchedule(Context c) {
+        Calendar now = Calendar.getInstance();
+        Schedule best = null;
+        for (Schedule s : schedules(c)) {
+            if (s.activeAt(now) && (best == null || s.activeEndMillis(now) > best.activeEndMillis(now))) best = s;
+        }
+        return best;
+    }
+
+    /** 차단이 끝나는 시각: 집중 모드와 예약 중 더 늦은 쪽. 수동 차단만이면 0. */
+    static long blockEndMillis(Context c) {
+        long end = lockEnd(c);
+        Schedule s = activeSchedule(c);
+        if (s != null) end = Math.max(end, s.activeEndMillis(Calendar.getInstance()));
+        return end;
+    }
 }
