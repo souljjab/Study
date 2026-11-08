@@ -97,7 +97,8 @@ func main() {
 			beep()
 		}
 		msg := map[string]string{"break": "집중 끝! 잠깐 쉬어요.", "focus": "휴식 끝. 다시 집중할 시간이에요.",
-			"done": "집중 시간을 마쳤어요. 수고했어요.", "schedEnd": "예약 차단이 끝났어요."}[kind]
+			"done": "집중 시간을 마쳤어요. 수고했어요.", "schedEnd": "예약 차단이 끝났어요.",
+			"unlockEnd": "긴급 해제 시간이 끝나 다시 차단해요."}[kind]
 		if parts := strings.Split(kind, "|"); parts[0] == "schedStart" && len(parts) == 3 {
 			msg = fmt.Sprintf("예약 차단 시작: %s (%s까지)", parts[1], parts[2])
 		}

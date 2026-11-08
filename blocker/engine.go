@@ -83,6 +83,8 @@ type Persist struct {
 	DayFocus     map[string]int            `json:"dayFocus"`
 	Hits         map[string]map[string]int `json:"hits"` // 날짜 → 도메인 → 막은 횟수
 	Schedules    []Schedule                `json:"schedules"`
+	Unlocks      []Unlock                  `json:"unlocks"`     // 긴급 잠금 해제 기록(지우지 않음)
+	UnlockUntil  int64                     `json:"unlockUntil"` // 긴급 해제가 끝나는 시각(유닉스 초)
 	NextID       int64                     `json:"nextId"`
 	SavedAt      int64                     `json:"savedAt"`
 }
@@ -124,10 +126,11 @@ type Engine struct {
 	path     string
 	lastTick time.Time
 	// OnPhase는 집중/휴식이 바뀌거나 타이머가 끝날 때 불린다(알림음). 잠금 밖에서 호출된다.
-	OnPhase func(kind string)
-	events  []string
-	now     time.Time // 마지막으로 받은 현재 시각(예약 판단용)
-	schedK  string    // 직전 틱에 켜져 있던 예약
+	OnPhase  func(kind string)
+	events   []string
+	now      time.Time // 마지막으로 받은 현재 시각(예약 판단용)
+	schedK   string    // 직전 틱에 켜져 있던 예약
+	unlockOn bool      // 직전 틱에 긴급 해제 중이었는지
 }
 
 func dateKey(t time.Time) string { return t.Format("2006-01-02") }
@@ -214,6 +217,12 @@ func (e *Engine) Tick(now time.Time) {
 		e.tickOnce(e.lastTick)
 	}
 	e.now = now
+	if u := e.unlocked(); e.unlockOn && !u {
+		e.events = append(e.events, "unlockEnd")
+		e.unlockOn = false
+	} else if u {
+		e.unlockOn = true
+	}
 	if k := e.scheduleKey(); k != e.schedK {
 		e.schedEvents(e.schedK, k)
 		e.schedK = k
@@ -294,9 +303,9 @@ func (e *Engine) focusEnforcing() bool {
 	return e.st.FocusOn && !(t.Phase == "break" && e.st.Settings.BreakUnblock && t.Mode == "pomo")
 }
 
-// enforcing은 집중 모드든 예약이든 지금 무언가를 막고 있는지다.
+// enforcing은 집중 모드든 예약이든 지금 실제로 막고 있는지다(긴급 해제 중이면 아님).
 func (e *Engine) enforcing() bool {
-	return e.focusEnforcing() || len(e.activeSchedules()) > 0
+	return !e.unlocked() && (e.focusEnforcing() || len(e.activeSchedules()) > 0)
 }
 
 // lockedFocus는 '잠금' 정책에서 타이머가 도는 동안이다.
@@ -356,6 +365,9 @@ func (e *Engine) active() *Preset {
 func (e *Engine) BlockedDomains() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.unlocked() {
+		return nil
+	}
 	set := map[string]bool{}
 	if e.focusEnforcing() {
 		for _, d := range presetDomains(e.active()) {
@@ -451,6 +463,7 @@ type payload struct {
 	Start  bool            `json:"start"`
 	Patch  json.RawMessage `json:"patch"`
 	Sched  *schedulePatch  `json:"sched"`
+	Reason string          `json:"reason"`
 }
 
 // Do는 UI 동작을 처리한다. 반환 에러 메시지는 UI에 그대로 보인다.
@@ -723,6 +736,8 @@ func (e *Engine) do(action string, p payload, now time.Time) error {
 			e.st.FocusOn = true
 			t.SessionStart = hm(now)
 		}
+	case "emergencyUnlock", "endUnlock":
+		return e.doUnlock(action, p)
 	case "skipOnboarding":
 		e.st.Onboarded = true
 	default:
@@ -814,6 +829,9 @@ type View struct {
 	Schedules    []ScheduleView `json:"schedules"`
 	ActiveScheds []int64        `json:"activeSchedules"`
 	Enforced     []int64        `json:"enforcedPresets"`
+	UnlockUntil  int64          `json:"unlockUntil"` // 밀리초, 긴급 해제 중이 아니면 0
+	Unlocks      []UnlockView   `json:"unlocks"`
+	Unlocks7d    int            `json:"unlocks7d"`
 	Timer        Timer          `json:"timer"`
 	Presets      []Preset       `json:"presets"`
 	ActivePreset int64          `json:"activePreset"`
@@ -839,6 +857,10 @@ func (e *Engine) View(now time.Time) View {
 		Timer: e.st.Timer, ActivePreset: e.active().ID, Settings: e.st.Settings, Cats: catList(),
 		TodayFocus: e.st.DayFocus[today], Now: now.UnixMilli(), Sessions: []Session{}, Top: []topItem{},
 		Schedules: e.scheduleViews(), ActiveScheds: []int64{}, Enforced: []int64{},
+		Unlocks: e.unlockViews(), Unlocks7d: e.unlockCount7d(),
+	}
+	if e.unlocked() {
+		v.UnlockUntil = e.st.UnlockUntil * 1000
 	}
 	if e.lockedFocus() {
 		v.LockReason = "timer"

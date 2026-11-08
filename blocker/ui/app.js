@@ -65,6 +65,7 @@ function App() {
   const [blockPage, setBlockPage] = useState(null); // { domain, preview }
   const [schedError, setSchedError] = useState('');
   const [rev, setRev] = useState(0); // 대화상자 취소 시 시간 입력칸을 되돌리려고 다시 그린다
+  const [unlockForm, setUnlockForm] = useState(null); // 긴급 잠금 해제 입력 { reason, min, custom, error }
   const seenOnboard = useRef(false);
 
   const apply = (r) => { if (r && r.state) setS(r.state); return r; };
@@ -214,6 +215,19 @@ function App() {
     guard('적용할 목록을 바꿀까요?', '목록을 바꾸면 지금 막고 있던 일부 사이트가 풀릴 수 있어요.', fn);
   }
   const setSetting = (patch) => act('settings', { patch });
+  // ── 긴급 잠금 해제 ──
+  function openUnlock() {
+    pending.current = null;
+    setDialog(null);
+    setUnlockForm({ reason: '', min: 10, custom: '', error: '' });
+  }
+  async function submitUnlock() {
+    const f = unlockForm;
+    const min = f.min > 0 ? f.min : parseInt(f.custom, 10) || 0;
+    const r = await act('emergencyUnlock', { reason: f.reason, min }, (e) => setUnlockForm((x) => ({ ...x, error: e })));
+    if (r && !r.error) setUnlockForm(null);
+  }
+  const endUnlock = () => act('endUnlock');
   // ── 예약 ──
   const schedGuard = (sc, title, body, fn) => (sc.active ? guard(title, body, fn) : fn());
   const addSchedule = (tpl = {}) => act('addSchedule', { name: tpl.name || '', sched: tpl.name ? { days: tpl.days, start: tpl.start, end: tpl.end } : null }, setSchedError).then((r) => r && !r.error && setSchedError(''));
@@ -253,9 +267,15 @@ function App() {
   const upcoming = S.schedules.filter((x) => x.next).sort((a, b) => rankNext(a.next).localeCompare(rankNext(b.next)))[0];
   const schedSummary = activeScheds.length ? `지금 차단 중 · ${schedEnd}까지` : upcoming ? `다음 · ${upcoming.next}` : '없음';
   const nav = [navItem('focus', '집중', 'ph-timer'), navItem('list', '차단 목록', 'ph-list-checks', String(S.presets.length)), navItem('schedule', '예약', 'ph-calendar-check', S.schedules.length ? String(S.schedules.length) : ''), navItem('stats', '기록', 'ph-chart-bar'), navItem('settings', '설정', 'ph-gear-six')];
-  const sideStatus = S.focusOn ? (enf ? '집중 모드 켜짐' : '휴식 중 · 차단 해제') : activeScheds.length ? '예약 차단 중' : '집중 모드 꺼짐';
+  const unlocking = S.unlockUntil > 0;
+  const unlockLeft = Math.max(0, Math.round((S.unlockUntil - S.now) / 1000));
+  const currentUnlock = unlocking ? S.unlocks.find((u) => u.ongoing) : null;
+  const canUnlock = !unlocking && (S.locked || S.enforcing);
+  const sideStatus = unlocking ? '긴급 해제 중' : S.focusOn ? (enf ? '집중 모드 켜짐' : '휴식 중 · 차단 해제') : activeScheds.length ? '예약 차단 중' : '집중 모드 꺼짐';
   const sideTime = isWatch ? (t.elapsed ? fmt(t.elapsed) : '—') : (t.running || t.remaining < t.total ? fmt(t.remaining) : '—');
-  const sideMeta = !S.focusOn && activeScheds.length
+  const sideMeta = unlocking
+    ? `${fmt(unlockLeft)} 뒤 다시 차단`
+    : !S.focusOn && activeScheds.length
     ? `${activeScheds[0].name} · ${schedEnd}까지`
     : enf ? `${active.name} · ${blocked}개 차단 중` : `${active.name} · ${blocked}개 대기`;
   const dotColor = enf ? 'var(--color-accent)' : 'var(--color-neutral-600)';
@@ -267,7 +287,9 @@ function App() {
     ? (isBreak ? `${Math.round(t.total / 60)}분 쉬고 다시 시작해요` : `세션 ${t.session} / 4 · 집중 ${st.focusMin}분`)
     : isWatch ? '정지하면 기록에 저장돼요' : `${t.freeMin}분 집중`;
   const timeVal = isWatch ? t.elapsed : t.remaining;
-  const focusDesc = S.focusOn
+  const focusDesc = S.unlockUntil > 0
+    ? '긴급 잠금 해제 중이에요. 정한 시간이 지나면 다시 막아요.'
+    : S.focusOn
     ? (enf ? `${blocked}개 사이트를 막고 있어요. 끄면 바로 모두 풀려요.` : '휴식 시간이라 차단이 잠시 풀렸어요.')
     : activeScheds.length
       ? `${activeScheds[0].name} 예약으로 차단 중이에요. ${schedEnd}에 저절로 풀려요.`
@@ -380,6 +402,11 @@ function App() {
               <span style="flex:1;">예약 차단</span>
               <button class="btn btn-ghost" onClick=${() => setView('schedule')} style=${`font-size:13px;padding:0 var(--space-1);min-height:0;color:${activeScheds.length ? 'var(--color-accent-300)' : 'var(--color-neutral-400)'};`}>${schedSummary} <i class="ph ph-arrow-right"></i></button>
             </div>
+            ${canUnlock && html`
+              <div style="display:flex;align-items:center;gap:var(--space-3);font-size:13px;">
+                <span class="text-muted" style="flex:1;font-size:12px;">정말 급할 때만 · 사유와 시간이 기록돼요</span>
+                <button class="btn btn-ghost" onClick=${openUnlock} style="font-size:13px;padding:0 var(--space-1);min-height:0;color:var(--color-neutral-400);"><i class="ph ph-siren"></i>긴급 잠금 해제</button>
+              </div>`}
           </div>
         </section>
 
@@ -605,13 +632,14 @@ function App() {
     { label: '이번 주 합계', value: dur(week.reduce((a, b) => a + b, 0) * 60) },
     { label: '오늘 세션', value: `${totalSessions}회` },
     { label: '막은 접속 시도', value: `${S.todayHits}회` },
+    { label: '긴급 해제 (7일)', value: `${S.unlocks7d}회` },
   ];
   const statsView = html`
     <header style="margin-bottom:var(--space-8);">
       <div class="card-kicker" style="margin-bottom:var(--space-2);">최근 7일</div>
       <h2 style="margin:0;font-size:28px;">기록</h2>
     </header>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--space-6);margin-bottom:var(--space-8);">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:var(--space-6);margin-bottom:var(--space-8);">
       ${statNums.map((n) => html`
         <div style="display:flex;flex-direction:column;gap:var(--space-2);">
           <div class="text-muted" style="font-size:12px;">${n.label}</div>
@@ -655,7 +683,22 @@ function App() {
           <tr><td style="font-variant-numeric:tabular-nums;">${r.time}</td><td class="text-muted">${r.mode}</td><td style="font-variant-numeric:tabular-nums;">${dur(r.dur)}</td><td class="text-muted" style="font-variant-numeric:tabular-nums;">${r.blocked}회</td></tr>`)}
       </tbody>
     </table>
-    ${S.sessions.length === 0 && html`<div class="text-muted" style="padding:var(--space-6) var(--space-2);font-size:14px;">오늘 끝낸 세션이 아직 없어요.</div>`}`;
+    ${S.sessions.length === 0 && html`<div class="text-muted" style="padding:var(--space-6) var(--space-2);font-size:14px;">오늘 끝낸 세션이 아직 없어요.</div>`}
+    <h6 class="text-muted" style="margin:var(--space-8) 0 var(--space-3);">긴급 잠금 해제 기록</h6>
+    <table class="table">
+      <thead><tr><th style="width:170px;">일시</th><th style="width:260px;">해제 시간</th><th>사유</th></tr></thead>
+      <tbody>
+        ${S.unlocks.map((u) => {
+          const at = new Date(u.at * 1000);
+          const when = `${at.getMonth() + 1}월 ${at.getDate()}일 (${DAYS[at.getDay()]}) ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+          const actual = u.actual < 60 ? `${u.actual}초` : dur(u.actual);
+          const span = u.ongoing ? `${u.minutes}분 · 진행 중`
+            : u.actual < u.minutes * 60 - 30 ? `${u.minutes}분 요청 · ${actual} 만에 다시 차단` : `${u.minutes}분`;
+          return html`<tr><td style="font-variant-numeric:tabular-nums;">${when}</td><td class=${u.ongoing ? '' : 'text-muted'} style="font-variant-numeric:tabular-nums;">${span}</td><td style="white-space:normal;">${u.reason}</td></tr>`;
+        })}
+      </tbody>
+    </table>
+    ${S.unlocks.length === 0 && html`<div class="text-muted" style="padding:var(--space-6) var(--space-2);font-size:14px;">긴급 잠금 해제를 한 적이 없어요.</div>`}`;
 
   const stepper = (key, label, desc, min, max, step) => ({
     key, label, desc, value: st[key],
@@ -746,6 +789,7 @@ function App() {
           <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;">
             <button class="btn btn-primary" onClick=${closeBlockPage} style="height:36px;"><i class="ph ph-arrow-left"></i>공부로 돌아가기</button>
             <button class="btn btn-ghost" onClick=${bpAllow} style="color:var(--color-neutral-400);">이 사이트 허용하기</button>
+            ${canUnlock && html`<button class="btn btn-ghost" onClick=${() => { setBlockPage(null); openUnlock(); }} style="color:var(--color-neutral-400);"><i class="ph ph-siren"></i>긴급 잠금 해제</button>`}
           </div>
         </div>
       </div>
@@ -842,10 +886,53 @@ function App() {
             <div class="text-muted" style="font-size:12px;font-variant-numeric:tabular-nums;">${d.count > 0 ? `${d.count}초 후에 해제할 수 있어요` : '해제할 수 있어요'}</div>
           </div>`}
         <div class="dialog-actions">
+          ${d.locked && canUnlock && html`<button class="btn btn-ghost" onClick=${openUnlock} style="color:var(--color-neutral-400);margin-right:auto;"><i class="ph ph-siren"></i>긴급 잠금 해제</button>`}
           ${!d.locked && html`<button class="btn btn-secondary" onClick=${confirmDialog} disabled=${d.count > 0}>해제</button>`}
           <button class="btn btn-primary" onClick=${cancelDialog}>계속 집중하기</button>
         </div>
       </div>
+    </div>`;
+
+  const uf = unlockForm;
+  const reasonLen = uf ? uf.reason.trim().replace(/\s+/g, ' ').length : 0;
+  const ufMin = uf ? (uf.min > 0 ? uf.min : parseInt(uf.custom, 10) || 0) : 0;
+  const unlockView = uf && html`
+    <div class="dialog-backdrop" onClick=${() => setUnlockForm(null)} style="z-index:45;">
+      <div class="dialog" onClick=${(e) => e.stopPropagation()} style="width:min(480px,92vw);">
+        <div style="display:flex;align-items:center;gap:var(--space-3);">
+          <i class="ph ph-siren" style="font-size:22px;color:var(--color-accent);"></i>
+          <div class="dialog-title">긴급 잠금 해제</div>
+        </div>
+        <div class="dialog-body">정말 필요한 경우에만 쓰세요. 사유와 해제 시간은 기록 화면에 남아요. 시간이 지나면 저절로 다시 차단돼요.</div>
+        <div class="field">
+          <label>정당한 사유</label>
+          <textarea class="input" rows="3" maxlength="300" placeholder="예: 온라인 강의 자료가 유튜브에만 올라와 있어요" value=${uf.reason}
+            onInput=${(e) => setUnlockForm({ ...uf, reason: e.target.value, error: '' })} style="resize:vertical;min-height:72px;font:inherit;"></textarea>
+          <div style=${`font-size:12px;color:${reasonLen >= 10 ? 'var(--color-neutral-500)' : 'var(--color-accent-300)'};`}>${reasonLen}자 · 10자 이상</div>
+        </div>
+        <div class="field">
+          <label>해제할 시간</label>
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center;">
+            ${[5, 10, 15, 30].map((m) => html`<button class=${uf.min === m ? 'btn btn-primary' : 'btn btn-secondary'} onClick=${() => setUnlockForm({ ...uf, min: m, error: '' })}>${m}분</button>`)}
+            <input class="input" type="number" min="1" max="60" placeholder="직접(분)" value=${uf.custom}
+              onInput=${(e) => setUnlockForm({ ...uf, custom: e.target.value, min: 0, error: '' })} style="width:110px;" />
+          </div>
+        </div>
+        ${uf.error && html`<div style="font-size:12px;color:var(--color-accent-300);">${uf.error}</div>`}
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" onClick=${submitUnlock} disabled=${reasonLen < 10 || ufMin < 1 || ufMin > 60}>${ufMin >= 1 && ufMin <= 60 ? `${ufMin}분 동안 해제` : '해제'}</button>
+          <button class="btn btn-primary" onClick=${() => setUnlockForm(null)}>계속 집중하기</button>
+        </div>
+      </div>
+    </div>`;
+  const unlockBanner = unlocking && html`
+    <div class="card" style="flex-direction:row;align-items:center;gap:var(--space-4);padding:var(--space-4) var(--space-6);margin-bottom:var(--space-6);box-shadow:0 0 0 1px var(--color-accent),0 0 24px var(--color-accent-900);flex-wrap:wrap;">
+      <i class="ph ph-lock-open" style="font-size:22px;color:var(--color-accent);"></i>
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:14px;">긴급 잠금 해제 중 · <span style="font-variant-numeric:tabular-nums;">${fmt(unlockLeft)}</span> 뒤 다시 차단</div>
+        <div class="text-muted" style="font-size:12px;">${currentUnlock ? `사유: ${currentUnlock.reason}` : ''}</div>
+      </div>
+      <button class="btn btn-primary" onClick=${endUnlock}><i class="ph ph-lock"></i>지금 다시 차단</button>
     </div>`;
 
   return html`
@@ -853,6 +940,7 @@ function App() {
       ${sidebar}
       <main style="padding:var(--space-8) 40px 64px;max-width:1120px;width:100%;">
         ${S.hostsError && html`<div class="card" style="flex-direction:row;align-items:center;gap:var(--space-3);padding:var(--space-4);margin-bottom:var(--space-6);box-shadow:0 0 0 1px var(--color-accent);"><i class="ph ph-warning" style="font-size:18px;color:var(--color-accent);"></i><span style="font-size:13px;">차단을 적용하지 못했어요: ${S.hostsError}</span></div>`}
+        ${unlockBanner}
         ${view === 'focus' && focusView}
         ${view === 'list' && listView}
         ${view === 'stats' && statsView}
@@ -862,7 +950,8 @@ function App() {
     </div>
     ${blockPageView}
     ${onboardingView}
-    ${dialogView}`;
+    ${dialogView}
+    ${unlockView}`;
 }
 
 // 텍스트 입력 밖에서는 브라우저 기본 메뉴를 막는다(앱처럼 보이게).
