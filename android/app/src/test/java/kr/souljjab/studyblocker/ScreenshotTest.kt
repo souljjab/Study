@@ -116,5 +116,40 @@ class ScreenshotTest {
     }
 
     @Test
+    fun unlock() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_5.copy(screenHeight = 2400))
+        val base = state(locked = true)
+        val now = base.now
+        fun u(agoMin: Long, min: Int, reason: String, endedAfterSec: Long = 0) = Unlock().apply {
+            at = now - agoMin * 60_000L
+            minutes = min
+            this.reason = reason
+            endedAt = if (endedAfterSec > 0) at + endedAfterSec * 1000 else 0
+        }
+        val log = listOf(
+            u(3, 10, "학원 단톡방 공지를 확인해야 해요"),
+            u(26 * 60, 15, "온라인 강의 자료가 유튜브에만 올라와 있어요", endedAfterSec = 240),
+            u(3 * 24 * 60, 5, "부모님께 급히 연락해야 했어요"),
+        )
+        val s = base.copy(unlockUntil = now + 7 * 60_000L, unlocks = log)
+        val pal = palette(s.mode, false)
+        paparazzi.snapshot {
+            StudyTheme {
+                Column(
+                    Modifier.fillMaxSize().background(pal.bg).padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Header(s, pal) {}
+                    UnlockBanner(s.unlockUntil - now, log[0].reason, pal) {}
+                    TimerBlock(s, pal, 50)
+                    Tabs(3, s, pal) {}
+                    UnlockLogHeader(2, 3, pal)
+                    log.forEach { UnlockLogRow(it, now, pal) }
+                }
+            }
+        }
+    }
+
+    @Test
     fun blocked() = paparazzi.snapshot { StudyTheme { BlockedScreen("YouTube", System.currentTimeMillis() + (29 * 60 + 30) * 1000L) {} } }
 }

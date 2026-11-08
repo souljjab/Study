@@ -134,7 +134,69 @@ final class Store {
 
     static boolean locked(Context c) { return lockEnd(c) > System.currentTimeMillis(); }
 
-    static boolean shouldBlock(Context c) { return manual(c) || locked(c) || activeSchedule(c) != null; }
+    static boolean shouldBlock(Context c) {
+        return !unlocked(c) && (manual(c) || locked(c) || activeSchedule(c) != null);
+    }
+
+    // ── 긴급 잠금 해제 ──
+
+    static long unlockUntil(Context c) { return p(c).getLong("unlockUntil", 0); }
+
+    /** 긴급 해제로 차단이 잠시 멈춘 동안. 잠금 규칙(목록·예약 변경 금지)은 그대로다. */
+    static boolean unlocked(Context c) { return unlockUntil(c) > System.currentTimeMillis(); }
+
+    /** 집중 모드나 예약으로 풀 수 없게 잠긴 차단이 있는지. */
+    static boolean lockActive(Context c) { return locked(c) || activeSchedule(c) != null; }
+
+    /** 최신 기록이 앞에 오도록. */
+    static List<Unlock> unlocks(Context c) {
+        List<Unlock> out = new ArrayList<>();
+        try {
+            JSONArray a = new JSONArray(p(c).getString("unlocks", "[]"));
+            for (int i = a.length() - 1; i >= 0; i--) out.add(Unlock.fromJson(a.getJSONObject(i)));
+        } catch (JSONException ignored) {
+        }
+        return out;
+    }
+
+    private static void saveUnlocks(Context c, List<Unlock> newestFirst) {
+        JSONArray a = new JSONArray();
+        try {
+            for (int i = newestFirst.size() - 1; i >= 0; i--) a.put(newestFirst.get(i).toJson());
+        } catch (JSONException ignored) {
+        }
+        p(c).edit().putString("unlocks", a.toString()).commit();
+    }
+
+    /** 긴급 해제를 시작한다. 실패하면 이유를, 성공하면 null을 돌려준다. */
+    static String emergencyUnlock(Context c, String reason, int minutes) {
+        if (unlocked(c)) return "이미 긴급 해제 중이에요.";
+        if (!lockActive(c)) return "지금은 잠긴 차단이 없어요.";
+        String r = Unlock.normalize(reason);
+        String err = Unlock.error(r, minutes);
+        if (err != null) return err;
+        Unlock u = new Unlock();
+        u.at = System.currentTimeMillis();
+        u.minutes = minutes;
+        u.reason = r;
+        List<Unlock> list = unlocks(c);
+        list.add(0, u);
+        saveUnlocks(c, list);
+        p(c).edit().putLong("unlockUntil", u.plannedEnd()).commit();
+        ScheduleAlarm.arm(c); // 끝나는 시각에 다시 차단
+        return null;
+    }
+
+    /** 긴급 해제를 일찍 끝내고 다시 차단한다. */
+    static void endUnlock(Context c) {
+        if (!unlocked(c)) return;
+        long now = System.currentTimeMillis();
+        List<Unlock> list = unlocks(c);
+        if (!list.isEmpty() && list.get(0).endedAt == 0) list.get(0).endedAt = now;
+        saveUnlocks(c, list);
+        p(c).edit().putLong("unlockUntil", now).commit();
+        ScheduleAlarm.arm(c);
+    }
 
     // ── 예약 ──
 

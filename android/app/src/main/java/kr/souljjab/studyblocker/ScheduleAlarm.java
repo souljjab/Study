@@ -40,6 +40,8 @@ public class ScheduleAlarm extends BroadcastReceiver {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Calendar now = Calendar.getInstance();
         long next = -1;
+        long until = Store.unlockUntil(ctx);
+        if (until > now.getTimeInMillis()) next = until + 1000; // 긴급 해제가 끝나면 다시 차단
         for (Schedule s : Store.schedules(ctx)) {
             long t = s.activeAt(now) ? s.activeEndMillis(now) + 1000 : s.nextStartMillis(now);
             if (t > 0 && (next < 0 || t < next)) next = t;

@@ -101,7 +101,14 @@ internal data class UiState(
     val schedStart: Long = 0,
     val schedEnd: Long = 0,
     val schedNext: Map<Long, String> = emptyMap(),
+    val unlockUntil: Long = 0,
+    val unlocks: List<Unlock> = emptyList(),
 ) {
+    val unlocking: Boolean get() = unlockUntil > now
+
+    /** 긴급 해제 버튼을 보여 줄지: 잠긴 차단이 있고 이미 해제 중이 아닐 때. */
+    val canUnlock: Boolean get() = (locked || activeSched != null) && !unlocking
+
     val mode: Mode
         get() = when {
             locked -> Mode.FOCUS
@@ -135,6 +142,8 @@ internal fun readState(c: Context) = UiState(
         schedStart = act?.activeStartMillis(now) ?: 0,
         schedEnd = act?.activeEndMillis(now) ?: 0,
         schedNext = list.associate { it.id to it.nextLabel(now) },
+        unlockUntil = Store.unlockUntil(c),
+        unlocks = Store.unlocks(c),
     )
 }
 
@@ -216,6 +225,7 @@ internal fun MainScreen() {
     var toDelete by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<Pair<Schedule, Boolean>?>(null) } // 예약, 새로 만드는지
     var schedDelete by remember { mutableStateOf<Schedule?>(null) }
+    var unlockOpen by remember { mutableStateOf(false) }
     val apps by produceState(emptyList<AppItem>()) {
         value = withContext(Dispatchers.IO) { loadApps(ctx) }
     }
@@ -263,6 +273,15 @@ internal fun MainScreen() {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item { Header(s, pal) { showPerms = true } }
+        if (s.unlocking) {
+            item {
+                UnlockBanner(s.unlockUntil - s.now, s.unlocks.firstOrNull()?.reason ?: "", pal) {
+                    Store.endUnlock(ctx)
+                    startBlocking()
+                    version++
+                }
+            }
+        }
         if (!s.perms.requiredDone) item { PermBanner(s.perms, pal) { showPerms = true } }
         item { TimerBlock(s, pal, minutes) }
         item {
@@ -293,6 +312,9 @@ internal fun MainScreen() {
                     }
                 }
             }
+        }
+        if (s.canUnlock) {
+            item { SharpButton("긴급 잠금 해제 (사유·시간 기록)", pal, filled = false) { unlockOpen = true } }
         }
         item { Stats(s, pal) }
         item { Tabs(tab, s, pal) { tab = it } }
@@ -339,6 +361,10 @@ internal fun MainScreen() {
                     version++
                 }
             }
+        } else if (tab == 3) {
+            item { UnlockLogHeader(s.unlocks.count { it.at >= s.now - 7 * 24 * 3600_000L }, s.unlocks.size, pal) }
+            if (s.unlocks.isEmpty()) item { Text("긴급 잠금 해제를 한 적이 없어요.", color = pal.muted) }
+            items(s.unlocks, key = { it.at }) { u -> UnlockLogRow(u, s.now, pal) }
         } else {
             item {
                 ScheduleIntro(
@@ -378,6 +404,21 @@ internal fun MainScreen() {
         }
     }
 
+    if (unlockOpen) {
+        UnlockDialog(
+            pal,
+            onSubmit = { reason, min ->
+                val err = Store.emergencyUnlock(ctx, reason, min)
+                if (err == null) {
+                    unlockOpen = false
+                    startBlocking() // 서비스가 차단을 멈추고 스스로 정리한다
+                    version++
+                }
+                err
+            },
+            onDismiss = { unlockOpen = false },
+        )
+    }
     editing?.let { (sc, isNew) ->
         val old = s.schedules.firstOrNull { it.id == sc.id }
         val active = old?.activeAt(java.util.Calendar.getInstance()) == true
@@ -493,7 +534,11 @@ internal fun TimerBlock(s: UiState, pal: Palette, minutes: Int) {
                 Label("남은 시간", pal)
                 BigDigits(fmt(left / 1000), pal.fg)
                 Bar(left.toFloat() / total.coerceAtLeast(1), pal)
-                Text("딴짓 금지. 지금은 공부할 시간.", color = pal.fg, fontWeight = FontWeight.Bold)
+                Text(
+                    if (s.unlocking) "긴급 해제 중이에요. 타이머는 계속 돌아요." else "딴짓 금지. 지금은 공부할 시간.",
+                    color = pal.fg,
+                    fontWeight = FontWeight.Bold,
+                )
             }
             Mode.SCHEDULE -> {
                 val left = s.schedEnd - s.now
@@ -605,7 +650,7 @@ internal fun Tabs(tab: Int, s: UiState, pal: Palette, onTab: (Int) -> Unit) {
             .fillMaxWidth()
             .border(2.dp, pal.fg),
     ) {
-        listOf("사이트 ${s.sites.size}", "앱 ${s.apps.size}", "예약 ${s.schedules.size}").forEachIndexed { i, t ->
+        listOf("사이트 ${s.sites.size}", "앱 ${s.apps.size}", "예약 ${s.schedules.size}", "기록 ${s.unlocks.size}").forEachIndexed { i, t ->
             val sel = i == tab
             Box(
                 Modifier
