@@ -270,7 +270,10 @@ function App() {
   const unlocking = S.unlockUntil > 0;
   const unlockLeft = Math.max(0, Math.round((S.unlockUntil - S.now) / 1000));
   const currentUnlock = unlocking ? S.unlocks.find((u) => u.ongoing) : null;
+  const unlockWait = S.nextUnlockAt > S.now; // 1시간에 한 번 제한으로 기다리는 중
+  const unlockWaitAt = unlockWait ? (() => { const d = new Date(S.nextUnlockAt); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; })() : '';
   const canUnlock = !unlocking && (S.locked || S.enforcing);
+  const unlockBtnLabel = unlockWait ? `긴급 해제 · ${unlockWaitAt}부터` : '긴급 잠금 해제';
   const sideStatus = unlocking ? '긴급 해제 중' : S.focusOn ? (enf ? '집중 모드 켜짐' : '휴식 중 · 차단 해제') : activeScheds.length ? '예약 차단 중' : '집중 모드 꺼짐';
   const sideTime = isWatch ? (t.elapsed ? fmt(t.elapsed) : '—') : (t.running || t.remaining < t.total ? fmt(t.remaining) : '—');
   const sideMeta = unlocking
@@ -404,8 +407,8 @@ function App() {
             </div>
             ${canUnlock && html`
               <div style="display:flex;align-items:center;gap:var(--space-3);font-size:13px;">
-                <span class="text-muted" style="flex:1;font-size:12px;">정말 급할 때만 · 사유와 시간이 기록돼요</span>
-                <button class="btn btn-ghost" onClick=${openUnlock} style="font-size:13px;padding:0 var(--space-1);min-height:0;color:var(--color-neutral-400);"><i class="ph ph-siren"></i>긴급 잠금 해제</button>
+                <span class="text-muted" style="flex:1;font-size:12px;">${unlockWait ? '긴급 해제는 1시간에 한 번만 할 수 있어요' : '정말 급할 때만 · 최대 30분 · 사유와 시간이 기록돼요'}</span>
+                <button class="btn btn-ghost" onClick=${openUnlock} disabled=${unlockWait} style="font-size:13px;padding:0 var(--space-1);min-height:0;color:var(--color-neutral-400);"><i class="ph ph-siren"></i>${unlockBtnLabel}</button>
               </div>`}
           </div>
         </section>
@@ -789,7 +792,7 @@ function App() {
           <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;">
             <button class="btn btn-primary" onClick=${closeBlockPage} style="height:36px;"><i class="ph ph-arrow-left"></i>공부로 돌아가기</button>
             <button class="btn btn-ghost" onClick=${bpAllow} style="color:var(--color-neutral-400);">이 사이트 허용하기</button>
-            ${canUnlock && html`<button class="btn btn-ghost" onClick=${() => { setBlockPage(null); openUnlock(); }} style="color:var(--color-neutral-400);"><i class="ph ph-siren"></i>긴급 잠금 해제</button>`}
+            ${canUnlock && html`<button class="btn btn-ghost" onClick=${() => { setBlockPage(null); openUnlock(); }} disabled=${unlockWait} style="color:var(--color-neutral-400);"><i class="ph ph-siren"></i>${unlockBtnLabel}</button>`}
           </div>
         </div>
       </div>
@@ -886,7 +889,7 @@ function App() {
             <div class="text-muted" style="font-size:12px;font-variant-numeric:tabular-nums;">${d.count > 0 ? `${d.count}초 후에 해제할 수 있어요` : '해제할 수 있어요'}</div>
           </div>`}
         <div class="dialog-actions">
-          ${d.locked && canUnlock && html`<button class="btn btn-ghost" onClick=${openUnlock} style="color:var(--color-neutral-400);margin-right:auto;"><i class="ph ph-siren"></i>긴급 잠금 해제</button>`}
+          ${d.locked && canUnlock && html`<button class="btn btn-ghost" onClick=${openUnlock} disabled=${unlockWait} style="color:var(--color-neutral-400);margin-right:auto;"><i class="ph ph-siren"></i>${unlockBtnLabel}</button>`}
           ${!d.locked && html`<button class="btn btn-secondary" onClick=${confirmDialog} disabled=${d.count > 0}>해제</button>`}
           <button class="btn btn-primary" onClick=${cancelDialog}>계속 집중하기</button>
         </div>
@@ -903,7 +906,7 @@ function App() {
           <i class="ph ph-siren" style="font-size:22px;color:var(--color-accent);"></i>
           <div class="dialog-title">긴급 잠금 해제</div>
         </div>
-        <div class="dialog-body">정말 필요한 경우에만 쓰세요. 사유와 해제 시간은 기록 화면에 남아요. 시간이 지나면 저절로 다시 차단돼요.</div>
+        <div class="dialog-body">정말 필요한 경우에만 쓰세요. 한 번에 최대 30분, 1시간에 한 번만 할 수 있어요. 사유와 해제 시간은 기록 화면에 남고, 시간이 지나면 저절로 다시 차단돼요.</div>
         <div class="field">
           <label>정당한 사유</label>
           <textarea class="input" rows="3" maxlength="300" placeholder="예: 온라인 강의 자료가 유튜브에만 올라와 있어요" value=${uf.reason}
@@ -914,13 +917,14 @@ function App() {
           <label>해제할 시간</label>
           <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center;">
             ${[5, 10, 15, 30].map((m) => html`<button class=${uf.min === m ? 'btn btn-primary' : 'btn btn-secondary'} onClick=${() => setUnlockForm({ ...uf, min: m, error: '' })}>${m}분</button>`)}
-            <input class="input" type="number" min="1" max="60" placeholder="직접(분)" value=${uf.custom}
+            <input class="input" type="number" min="1" max="30" placeholder="직접(분)" value=${uf.custom}
               onInput=${(e) => setUnlockForm({ ...uf, custom: e.target.value, min: 0, error: '' })} style="width:110px;" />
           </div>
         </div>
+        ${ufMin > 30 && html`<div style="font-size:12px;color:var(--color-accent-300);">한 번에 최대 30분까지 해제할 수 있어요.</div>`}
         ${uf.error && html`<div style="font-size:12px;color:var(--color-accent-300);">${uf.error}</div>`}
         <div class="dialog-actions">
-          <button class="btn btn-secondary" onClick=${submitUnlock} disabled=${reasonLen < 10 || ufMin < 1 || ufMin > 60}>${ufMin >= 1 && ufMin <= 60 ? `${ufMin}분 동안 해제` : '해제'}</button>
+          <button class="btn btn-secondary" onClick=${submitUnlock} disabled=${reasonLen < 10 || ufMin < 1 || ufMin > 30}>${ufMin >= 1 && ufMin <= 30 ? `${ufMin}분 동안 해제` : '해제'}</button>
           <button class="btn btn-primary" onClick=${() => setUnlockForm(null)}>계속 집중하기</button>
         </div>
       </div>

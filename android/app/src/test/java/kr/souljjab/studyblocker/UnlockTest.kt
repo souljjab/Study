@@ -14,8 +14,9 @@ class UnlockTest {
         assertNotNull(Unlock.error(Unlock.normalize("그냥"), 10))
         assertNotNull(Unlock.error(Unlock.normalize("          "), 10))
         assertNotNull(Unlock.error("학교 공지 확인이 필요해요", 0))
-        assertNotNull(Unlock.error("학교 공지 확인이 필요해요", 61))
-        assertNull(Unlock.error("학교 공지 확인이 필요해요", 60))
+        assertNotNull(Unlock.error("학교 공지 확인이 필요해요", 31))
+        assertNotNull(Unlock.error("학교 공지 확인이 필요해요", 60))
+        assertNull(Unlock.error("학교 공지 확인이 필요해요", 30))
         assertNull(Unlock.error("abcdefghij", 1))
     }
 
@@ -24,6 +25,14 @@ class UnlockTest {
         minutes = min
         reason = "온라인 강의 자료 확인"
         endedAt = if (endedAfterSec > 0) at + endedAfterSec * 1000 else 0
+    }
+
+    @Test
+    fun oncePerHour() {
+        assertEquals(0L, Unlock.nextAllowed(emptyList()))
+        val recent = unlock(10) // at = 1_000_000
+        val older = unlock(5).apply { at = 0 }
+        assertEquals(1_000_000L + 3_600_000L, Unlock.nextAllowed(listOf(recent, older)))
     }
 
     @Test

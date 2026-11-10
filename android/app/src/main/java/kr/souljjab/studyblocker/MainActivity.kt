@@ -109,6 +109,10 @@ internal data class UiState(
     /** 긴급 해제 버튼을 보여 줄지: 잠긴 차단이 있고 이미 해제 중이 아닐 때. */
     val canUnlock: Boolean get() = (locked || activeSched != null) && !unlocking
 
+    /** 1시간에 한 번 제한: 다음 긴급 해제가 가능한 시각. 지금 가능하면 now 이하. */
+    val nextUnlockAt: Long get() = Unlock.nextAllowed(unlocks)
+    val unlockWait: Boolean get() = nextUnlockAt > now
+
     val mode: Mode
         get() = when {
             locked -> Mode.FOCUS
@@ -314,7 +318,14 @@ internal fun MainScreen() {
             }
         }
         if (s.canUnlock) {
-            item { SharpButton("긴급 잠금 해제 (사유·시간 기록)", pal, filled = false) { unlockOpen = true } }
+            item {
+                SharpButton(
+                    if (s.unlockWait) "긴급 해제 · ${hhmm(s.nextUnlockAt)}부터 가능" else "긴급 잠금 해제 (최대 30분 · 기록됨)",
+                    pal,
+                    filled = false,
+                    enabled = !s.unlockWait,
+                ) { unlockOpen = true }
+            }
         }
         item { Stats(s, pal) }
         item { Tabs(tab, s, pal) { tab = it } }

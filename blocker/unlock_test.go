@@ -17,7 +17,7 @@ func TestEmergencyUnlockValidation(t *testing.T) {
 		`{"reason":"그냥","min":10}`,             // 사유가 짧음
 		`{"reason":"          ","min":10}`,     // 공백만
 		`{"reason":"학교 공지 확인이 필요해요","min":0}`,  // 0분
-		`{"reason":"학교 공지 확인이 필요해요","min":61}`, // 60분 초과
+		`{"reason":"학교 공지 확인이 필요해요","min":31}`, // 30분 초과
 	} {
 		if err := e.Do("emergencyUnlock", []byte(bad), t0); err == nil {
 			t.Errorf("거부돼야 함: %s", bad)
@@ -71,8 +71,17 @@ func TestEmergencyUnlockPausesBlockingAndLogs(t *testing.T) {
 	if v.Unlocks[0].Actual != 600 || v.Unlocks[0].Ongoing || v.UnlockUntil != 0 {
 		t.Fatalf("실제 시간: %+v", v.Unlocks[0])
 	}
-	// 두 번째: 3분 만에 직접 다시 차단 → 기록은 최신순
-	later := now.Add(20 * time.Minute)
+	// 1시간이 안 지났으면 다시 해제할 수 없다
+	soon := now.Add(30 * time.Minute)
+	e.Tick(soon)
+	if err := e.Do("emergencyUnlock", []byte(`{"reason":"한 번만 더 풀어 주세요 제발요","min":5}`), soon); err == nil {
+		t.Fatal("1시간 안에 두 번째 해제는 거부")
+	}
+	if v := e.View(soon); v.NextUnlockAt != now.Add(time.Hour).Unix()*1000 {
+		t.Fatalf("다음 가능 시각: %d", v.NextUnlockAt)
+	}
+	// 두 번째: 1시간 뒤, 3분 만에 직접 다시 차단 → 기록은 최신순
+	later := now.Add(60 * time.Minute)
 	e.Tick(later)
 	do(t, e, "emergencyUnlock", `{"reason":"부모님께 급히 연락해야 해요","min":30}`, later)
 	e.Tick(later.Add(3 * time.Minute))

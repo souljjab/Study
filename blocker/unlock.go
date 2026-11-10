@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -18,7 +19,8 @@ type Unlock struct {
 
 const (
 	minUnlockReason = 10
-	maxUnlockMin    = 60
+	maxUnlockMin    = 30   // 한 번에 최대 30분
+	unlockCooldown  = 3600 // 직전 긴급 해제를 시작하고 1시간이 지나야 다시 가능(초)
 )
 
 // validateUnlock은 긴급 해제 입력을 확인하고 다듬은 사유를 돌려준다.
@@ -31,7 +33,7 @@ func validateUnlock(reason string, minutes int) (string, error) {
 		return "", errors.New("사유는 300자까지 적을 수 있어요.")
 	}
 	if minutes < 1 || minutes > maxUnlockMin {
-		return "", errors.New("해제 시간은 1~60분 사이로 정하세요.")
+		return "", errors.New("해제 시간은 1~30분 사이로 정하세요.")
 	}
 	return r, nil
 }
@@ -48,6 +50,9 @@ func (e *Engine) doUnlock(action string, p payload) error {
 	case "emergencyUnlock":
 		if e.unlocked() {
 			return errors.New("이미 긴급 해제 중이에요.")
+		}
+		if next := e.nextUnlockAt(); now < next {
+			return fmt.Errorf("긴급 해제는 1시간에 한 번만 할 수 있어요. %s부터 다시 가능해요.", time.Unix(next, 0).Format("15:04"))
 		}
 		if !e.focusEnforcing() && len(e.activeSchedules()) == 0 {
 			return errors.New("지금은 막고 있는 게 없어요.")
@@ -71,6 +76,14 @@ func (e *Engine) doUnlock(action string, p payload) error {
 		e.unlockOn = false
 	}
 	return nil
+}
+
+// nextUnlockAt은 다음 긴급 해제가 가능한 시각(유닉스 초). 기록이 없으면 0.
+func (e *Engine) nextUnlockAt() int64 {
+	if n := len(e.st.Unlocks); n > 0 {
+		return e.st.Unlocks[n-1].At + unlockCooldown
+	}
+	return 0
 }
 
 // UnlockView는 기록 화면용이다. Actual은 실제로 풀려 있던 초.

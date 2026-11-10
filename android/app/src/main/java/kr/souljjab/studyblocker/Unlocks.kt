@@ -69,7 +69,8 @@ internal fun UnlockDialog(pal: Palette, onSubmit: (String, Int) -> String?, onDi
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "정말 필요한 경우에만 쓰세요. 사유와 해제 시간은 기록에 남고, 시간이 지나면 저절로 다시 차단돼요.",
+                    "정말 필요한 경우에만 쓰세요. 한 번에 최대 30분, 1시간에 한 번만 할 수 있어요. " +
+                        "사유와 해제 시간은 기록에 남고, 시간이 지나면 저절로 다시 차단돼요.",
                     color = pal.fg,
                     fontSize = 14.sp,
                 )
@@ -109,13 +110,14 @@ internal fun UnlockDialog(pal: Palette, onSubmit: (String, Int) -> String?, onDi
                 OutlinedTextField(
                     value = custom,
                     onValueChange = { v -> custom = v.filter(Char::isDigit).take(2); minutes = 0; error = null },
-                    label = { Text("직접 입력 (1~60분)") },
+                    label = { Text("직접 입력 (1~30분)") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     shape = RectangleShape,
                     colors = sharpFieldColors(pal),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (min > Unlock.MAX_MINUTES) Text("한 번에 최대 30분까지 해제할 수 있어요.", color = pal.fg, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 error?.let { Text(it, color = pal.fg, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
             }
         },
@@ -131,6 +133,11 @@ internal fun UnlockDialog(pal: Palette, onSubmit: (String, Int) -> String?, onDi
 }
 
 private val DAY_NAMES = arrayOf("일", "월", "화", "수", "목", "금", "토")
+
+internal fun hhmm(millis: Long): String {
+    val c = Calendar.getInstance().apply { timeInMillis = millis }
+    return "%02d:%02d".format(c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE))
+}
 
 internal fun unlockWhen(at: Long): String {
     val c = Calendar.getInstance().apply { timeInMillis = at }

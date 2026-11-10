@@ -832,6 +832,7 @@ type View struct {
 	UnlockUntil  int64          `json:"unlockUntil"` // 밀리초, 긴급 해제 중이 아니면 0
 	Unlocks      []UnlockView   `json:"unlocks"`
 	Unlocks7d    int            `json:"unlocks7d"`
+	NextUnlockAt int64          `json:"nextUnlockAt"` // 밀리초, 지금 가능하면 0
 	Timer        Timer          `json:"timer"`
 	Presets      []Preset       `json:"presets"`
 	ActivePreset int64          `json:"activePreset"`
@@ -861,6 +862,9 @@ func (e *Engine) View(now time.Time) View {
 	}
 	if e.unlocked() {
 		v.UnlockUntil = e.st.UnlockUntil * 1000
+	}
+	if next := e.nextUnlockAt(); next > now.Unix() {
+		v.NextUnlockAt = next * 1000
 	}
 	if e.lockedFocus() {
 		v.LockReason = "timer"

@@ -6,7 +6,8 @@ import org.json.JSONObject;
 /** 긴급 잠금 해제 한 번의 기록. 지우지 않고 계속 남긴다. */
 public final class Unlock {
     static final int MIN_REASON = 10;
-    static final int MAX_MINUTES = 60;
+    static final int MAX_MINUTES = 30;           // 한 번에 최대 30분
+    static final long COOLDOWN_MS = 60 * 60_000L; // 직전 해제를 시작하고 1시간이 지나야 다시 가능
 
     long at;       // 시작(밀리초)
     int minutes;   // 요청한 해제 시간
@@ -23,8 +24,13 @@ public final class Unlock {
         int n = normalizedReason.codePointCount(0, normalizedReason.length());
         if (n < MIN_REASON) return "사유를 10자 이상 적어 주세요.";
         if (n > 300) return "사유는 300자까지 적을 수 있어요.";
-        if (minutes < 1 || minutes > MAX_MINUTES) return "해제 시간은 1~60분 사이로 정하세요.";
+        if (minutes < 1 || minutes > MAX_MINUTES) return "해제 시간은 1~30분 사이로 정하세요.";
         return null;
+    }
+
+    /** 다음 긴급 해제가 가능한 시각(밀리초). 기록이 없으면 0. newestFirst는 최신 기록이 앞. */
+    static long nextAllowed(java.util.List<Unlock> newestFirst) {
+        return newestFirst.isEmpty() ? 0 : newestFirst.get(0).at + COOLDOWN_MS;
     }
 
     long plannedEnd() { return at + minutes * 60_000L; }

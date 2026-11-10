@@ -175,11 +175,19 @@ final class Store {
         String r = Unlock.normalize(reason);
         String err = Unlock.error(r, minutes);
         if (err != null) return err;
+        List<Unlock> list = unlocks(c);
+        long now = System.currentTimeMillis();
+        long next = Unlock.nextAllowed(list);
+        if (now < next) {
+            Calendar t = Calendar.getInstance();
+            t.setTimeInMillis(next);
+            return String.format(Locale.ROOT, "긴급 해제는 1시간에 한 번만 할 수 있어요. %02d:%02d부터 다시 가능해요.",
+                    t.get(Calendar.HOUR_OF_DAY), t.get(Calendar.MINUTE));
+        }
         Unlock u = new Unlock();
-        u.at = System.currentTimeMillis();
+        u.at = now;
         u.minutes = minutes;
         u.reason = r;
-        List<Unlock> list = unlocks(c);
         list.add(0, u);
         saveUnlocks(c, list);
         p(c).edit().putLong("unlockUntil", u.plannedEnd()).commit();
