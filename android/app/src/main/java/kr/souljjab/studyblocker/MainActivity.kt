@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,10 +70,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    /** 차단 화면의 '긴급 잠금 해제'로 들어왔을 때 해제 창을 바로 연다. */
+    private var unlockRequest by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { StudyTheme { MainScreen() } }
+        if (savedInstanceState == null) unlockRequest = intent?.getBooleanExtra(EXTRA_UNLOCK, false) == true
+        setContent { StudyTheme { MainScreen(unlockRequest) { unlockRequest = false } } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_UNLOCK, false)) unlockRequest = true
+    }
+
+    companion object {
+        const val EXTRA_UNLOCK = "unlock"
     }
 
     override fun onResume() {
@@ -105,7 +119,12 @@ internal data class UiState(
     val unlocks: List<Unlock> = emptyList(),
     val secureFolder: Boolean = true,
     val secureFolderAvailable: Boolean = false,
+    val week: List<Int> = List(7) { 0 }, // 최근 7일 집중 분, 마지막이 오늘
 ) {
+    /** 오늘 실제로 집중한 분(진행 중인 집중의 남은 시간은 뺀다). */
+    val todayDone: Int
+        get() = (todayMin - if (locked) ((lockEnd - now + 59_999) / 60_000).toInt() else 0).coerceAtLeast(0)
+
     val unlocking: Boolean get() = unlockUntil > now
 
     /** 긴급 해제 버튼을 보여 줄지: 잠긴 차단이 있고 이미 해제 중이 아닐 때. */
@@ -152,6 +171,7 @@ internal fun readState(c: Context) = UiState(
         unlocks = Store.unlocks(c),
         secureFolder = Store.secureFolderBlock(c),
         secureFolderAvailable = SecureFolder.available(c),
+        week = Store.weekMinutes(c).toList(),
     )
 }
 
@@ -181,7 +201,7 @@ internal fun loadApps(c: Context): List<AppItem> {
 internal fun toast(c: Context, msg: String) = Toast.makeText(c, msg, Toast.LENGTH_SHORT).show()
 
 @Composable
-internal fun MainScreen() {
+internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: () -> Unit = {}) {
     val ctx = LocalContext.current
     var version by remember { mutableIntStateOf(0) }
     var tick by remember { mutableIntStateOf(0) }
@@ -228,12 +248,19 @@ internal fun MainScreen() {
     var preset by rememberSaveable { mutableIntStateOf(50) } // -1 = 직접 입력
     var custom by rememberSaveable { mutableStateOf("") }
     val minutes = if (preset > 0) preset else custom.toIntOrNull() ?: 0
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var page by rememberSaveable { mutableIntStateOf(0) } // 0 집중, 1 목록, 2 예약, 3 기록
+    var tab by rememberSaveable { mutableIntStateOf(0) } // 목록 화면: 0 사이트, 1 앱
     var newSite by rememberSaveable { mutableStateOf("") }
     var toDelete by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<Pair<Schedule, Boolean>?>(null) } // 예약, 새로 만드는지
     var schedDelete by remember { mutableStateOf<Schedule?>(null) }
     var unlockOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(unlockRequest) {
+        if (unlockRequest) {
+            if (s.canUnlock && !s.unlockWait) unlockOpen = true
+            onUnlockRequestHandled()
+        }
+    }
     val apps by produceState(emptyList<AppItem>()) {
         value = withContext(Dispatchers.IO) { loadApps(ctx) }
     }
@@ -271,160 +298,165 @@ internal fun MainScreen() {
         return
     }
 
-    LazyColumn(
+    Column(
         Modifier
             .fillMaxSize()
             .background(bg)
             .systemBarsPadding()
             .imePadding(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item { Header(s, pal) { showPerms = true } }
-        if (s.unlocking) {
-            item {
-                UnlockBanner(s.unlockUntil - s.now, s.unlocks.firstOrNull()?.reason ?: "", pal) {
-                    Store.endUnlock(ctx)
-                    startBlocking()
-                    version++
-                }
-            }
-        }
-        if (!s.perms.requiredDone) item { PermBanner(s.perms, pal) { showPerms = true } }
-        item { TimerBlock(s, pal, minutes) }
-        item {
-            Presets(preset, custom, pal, onPreset = { preset = it }, onCustom = { custom = it })
-        }
-        item {
-            SharpButton(
-                if (s.locked) "+${minutes}분 연장" else "집중 시작",
-                pal,
-                enabled = minutes in 1..1440,
-            ) { startFocus() }
-        }
-        item {
-            SharpButton(
-                if (s.manual) "수동 차단 해제" else "지금 바로 차단 (수동)",
-                pal,
-                filled = false,
-                enabled = !s.locked,
-            ) {
-                if (s.manual) {
-                    Store.setManual(ctx, false)
-                    startBlocking() // 서비스가 스스로 정리한다.
-                    version++
-                } else {
-                    withVpn {
-                        Store.setManual(ctx, true)
-                        startBlocking()
-                    }
-                }
-            }
-        }
-        if (s.canUnlock) {
-            item {
-                SharpButton(
-                    if (s.unlockWait) "긴급 해제 · ${hhmm(s.nextUnlockAt)}부터 가능" else "긴급 잠금 해제 (최대 30분 · 기록됨)",
-                    pal,
-                    filled = false,
-                    enabled = !s.unlockWait,
-                ) { unlockOpen = true }
-            }
-        }
-        item { Stats(s, pal) }
-        item { Tabs(tab, s, pal) { tab = it } }
-        if (tab == 0) {
-            item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedTextField(
-                        value = newSite,
-                        onValueChange = { newSite = it },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        placeholder = { Text("example.com") },
-                        shape = RectangleShape,
-                        colors = sharpFieldColors(pal),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    )
-                    SharpButton("추가", pal, Modifier.width(84.dp)) {
-                        val d = Store.normalize(newSite)
-                        if (d == null) {
-                            toast(ctx, "올바른 주소가 아니에요")
-                        } else {
-                            val list = ArrayList(s.sites)
-                            if (d !in list) list.add(d)
-                            Store.saveSites(ctx, list)
-                            newSite = ""
-                            version++
-                        }
-                    }
-                }
-            }
-            items(s.sites, key = { it }) { d ->
-                SiteRow(d, pal, deletable = !s.listLocked) { toDelete = d }
-            }
-        } else if (tab == 1) {
-            if (s.secureFolderAvailable) {
+        LazyColumn(
+            Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item { Header(s, pal) { showPerms = true } }
+            if (s.unlocking) {
                 item {
-                    SecureFolderRow(s.secureFolder, s.listLocked, pal) { on ->
-                        Store.setSecureFolderBlock(ctx, on)
+                    UnlockBanner(s.unlockUntil - s.now, s.unlocks.firstOrNull()?.reason ?: "", pal) {
+                        Store.endUnlock(ctx)
+                        startBlocking()
                         version++
                     }
                 }
             }
-            if (apps.isEmpty()) item { Text("앱 목록 불러오는 중…", color = pal.muted) }
-            items(apps, key = { it.pkg }) { a ->
-                AppRow(a, a.pkg in s.apps, s.listLocked, pal) { on ->
-                    val set = HashSet(s.apps)
-                    if (on) set.add(a.pkg) else set.remove(a.pkg)
-                    Store.saveApps(ctx, set)
-                    version++
+            if (!s.perms.requiredDone) item { PermBanner(s.perms, pal) { showPerms = true } }
+            when (page) {
+                0 -> {
+                    item { TimerBlock(s, pal, minutes) }
+                    item {
+                        Presets(preset, custom, pal, onPreset = { preset = it }, onCustom = { custom = it })
+                    }
+                    item {
+                        SharpButton(
+                            if (s.locked) "+${minutes}분 연장" else "집중 시작",
+                            pal,
+                            enabled = minutes in 1..1440,
+                        ) { startFocus() }
+                    }
+                    item {
+                        SharpButton(
+                            if (s.manual) "수동 차단 해제" else "지금 바로 차단 (수동)",
+                            pal,
+                            filled = false,
+                            enabled = !s.locked,
+                        ) {
+                            if (s.manual) {
+                                Store.setManual(ctx, false)
+                                startBlocking() // 서비스가 스스로 정리한다.
+                                version++
+                            } else {
+                                withVpn {
+                                    Store.setManual(ctx, true)
+                                    startBlocking()
+                                }
+                            }
+                        }
+                    }
+                    item { FocusFooter(s, pal) { unlockOpen = true } }
+                }
+                1 -> {
+                    item { Tabs(tab, s, pal) { tab = it } }
+                    if (tab == 0) {
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                OutlinedTextField(
+                                    value = newSite,
+                                    onValueChange = { newSite = it },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    placeholder = { Text("example.com") },
+                                    shape = RectangleShape,
+                                    colors = sharpFieldColors(pal),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                                )
+                                SharpButton("추가", pal, Modifier.width(84.dp)) {
+                                    val d = Store.normalize(newSite)
+                                    if (d == null) {
+                                        toast(ctx, "올바른 주소가 아니에요")
+                                    } else {
+                                        val list = ArrayList(s.sites)
+                                        if (d !in list) list.add(d)
+                                        Store.saveSites(ctx, list)
+                                        newSite = ""
+                                        version++
+                                    }
+                                }
+                            }
+                        }
+                        items(s.sites, key = { it }) { d ->
+                            SiteRow(d, pal, deletable = !s.listLocked) { toDelete = d }
+                        }
+                    } else {
+                        if (s.secureFolderAvailable) {
+                            item {
+                                SecureFolderRow(s.secureFolder, s.listLocked, pal) { on ->
+                                    Store.setSecureFolderBlock(ctx, on)
+                                    version++
+                                }
+                            }
+                        }
+                        if (apps.isEmpty()) item { Text("앱 목록 불러오는 중…", color = pal.muted) }
+                        items(apps, key = { it.pkg }) { a ->
+                            AppRow(a, a.pkg in s.apps, s.listLocked, pal) { on ->
+                                val set = HashSet(s.apps)
+                                if (on) set.add(a.pkg) else set.remove(a.pkg)
+                                Store.saveApps(ctx, set)
+                                version++
+                            }
+                        }
+                    }
+                    item {
+                        Text(
+                            "집중 중이거나 예약 시간에는 목록에서 빼거나 차단을 끌 수 없습니다. " +
+                                "단, 휴대폰 설정에서 VPN·접근성 권한을 끄면 차단이 풀립니다.",
+                            color = pal.muted,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+                2 -> {
+                    item {
+                        ScheduleIntro(
+                            pal,
+                            onAdd = { editing = newSchedule(ctx) to true },
+                            onTemplate = { t -> withVpn { saveSchedule(ctx, newSchedule(ctx, t)); ScheduleAlarm.ensureBlocking(ctx) } },
+                        )
+                    }
+                    if (s.schedules.isEmpty()) item { Text("아직 예약이 없어요.", color = pal.muted) }
+                    items(s.schedules, key = { it.id }) { sc ->
+                        val active = s.activeSched?.id == sc.id || (sc.activeAt(java.util.Calendar.getInstance()))
+                        ScheduleRow(
+                            sc, active, s.schedNext[sc.id] ?: "", if (active) sc.activeEndMillis(java.util.Calendar.getInstance()) else 0, pal,
+                            onToggle = { on ->
+                                val next = sc.copy().also { it.enabled = on }
+                                if (!scheduleChangeAllowed(sc, next, active)) {
+                                    toast(ctx, "적용 중인 예약은 끝날 때까지 끌 수 없어요")
+                                } else if (on) {
+                                    withVpn { saveSchedule(ctx, next); ScheduleAlarm.ensureBlocking(ctx) }
+                                } else {
+                                    saveSchedule(ctx, next)
+                                    version++
+                                }
+                            },
+                            onEdit = { editing = sc.copy() to false },
+                            onDelete = { if (active) toast(ctx, "적용 중인 예약은 지울 수 없어요") else schedDelete = sc },
+                        )
+                    }
+                }
+                else -> {
+                    item { Stats(s, pal) }
+                    item { WeekChart(s.week, s.todayDone, s.now, pal) }
+                    item { UnlockLogHeader(s.unlocks.count { it.at >= s.now - 7 * 24 * 3600_000L }, s.unlocks.size, pal) }
+                    if (s.unlocks.isEmpty()) item { Text("긴급 잠금 해제를 한 적이 없어요.", color = pal.muted) }
+                    items(s.unlocks, key = { it.at }) { u -> UnlockLogRow(u, s.now, pal) }
                 }
             }
-        } else if (tab == 3) {
-            item { UnlockLogHeader(s.unlocks.count { it.at >= s.now - 7 * 24 * 3600_000L }, s.unlocks.size, pal) }
-            if (s.unlocks.isEmpty()) item { Text("긴급 잠금 해제를 한 적이 없어요.", color = pal.muted) }
-            items(s.unlocks, key = { it.at }) { u -> UnlockLogRow(u, s.now, pal) }
-        } else {
-            item {
-                ScheduleIntro(
-                    pal,
-                    onAdd = { editing = newSchedule(ctx) to true },
-                    onTemplate = { t -> withVpn { saveSchedule(ctx, newSchedule(ctx, t)); ScheduleAlarm.ensureBlocking(ctx) } },
-                )
-            }
-            if (s.schedules.isEmpty()) item { Text("아직 예약이 없어요.", color = pal.muted) }
-            items(s.schedules, key = { it.id }) { sc ->
-                val active = s.activeSched?.id == sc.id || (sc.activeAt(java.util.Calendar.getInstance()))
-                ScheduleRow(
-                    sc, active, s.schedNext[sc.id] ?: "", if (active) sc.activeEndMillis(java.util.Calendar.getInstance()) else 0, pal,
-                    onToggle = { on ->
-                        val next = sc.copy().also { it.enabled = on }
-                        if (!scheduleChangeAllowed(sc, next, active)) {
-                            toast(ctx, "적용 중인 예약은 끝날 때까지 끌 수 없어요")
-                        } else if (on) {
-                            withVpn { saveSchedule(ctx, next); ScheduleAlarm.ensureBlocking(ctx) }
-                        } else {
-                            saveSchedule(ctx, next)
-                            version++
-                        }
-                    },
-                    onEdit = { editing = sc.copy() to false },
-                    onDelete = { if (active) toast(ctx, "적용 중인 예약은 지울 수 없어요") else schedDelete = sc },
-                )
-            }
         }
-        item {
-            Text(
-                "집중 중이거나 예약 시간에는 목록에서 빼거나 차단을 끌 수 없습니다. " +
-                    "단, 휴대폰 설정에서 VPN·접근성 권한을 끄면 차단이 풀립니다.",
-                color = pal.muted,
-                fontSize = 12.sp,
-            )
-        }
+        BottomNav(page, pal) { page = it }
     }
 
     if (unlockOpen) {
@@ -638,9 +670,7 @@ internal fun Presets(
 
 @Composable
 internal fun Stats(s: UiState, pal: Palette) {
-    val left = if (s.locked) ((s.lockEnd - s.now + 59_999) / 60_000).toInt() else 0
-    val done = (s.todayMin - left).coerceAtLeast(0)
-    val doneText = if (done >= 60) "${done / 60}시간 ${done % 60}분" else "${done}분"
+    val doneText = minutesText(s.todayDone)
     Row(
         Modifier
             .fillMaxWidth()
@@ -673,7 +703,7 @@ internal fun Tabs(tab: Int, s: UiState, pal: Palette, onTab: (Int) -> Unit) {
             .fillMaxWidth()
             .border(2.dp, pal.fg),
     ) {
-        listOf("사이트 ${s.sites.size}", "앱 ${s.apps.size}", "예약 ${s.schedules.size}", "기록 ${s.unlocks.size}").forEachIndexed { i, t ->
+        listOf("사이트 ${s.sites.size}", "앱 ${s.apps.size}").forEachIndexed { i, t ->
             val sel = i == tab
             Box(
                 Modifier
@@ -768,5 +798,122 @@ internal fun SecureFolderRow(on: Boolean, locked: Boolean, pal: Palette, onChang
         }
         Spacer(Modifier.width(12.dp))
         SquareToggle(on, pal, enabled = !(locked && on), onChange = onChange)
+    }
+}
+
+internal fun minutesText(m: Int): String = if (m >= 60) "${m / 60}시간 ${m % 60}분" else "${m}분"
+
+/** 화면 맨 아래 메뉴. 선택된 칸은 채운다. */
+@Composable
+internal fun BottomNav(page: Int, pal: Palette, onPage: (Int) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(pal.bg)
+            .border(2.dp, pal.fg),
+    ) {
+        listOf("집중", "목록", "예약", "기록").forEachIndexed { i, t ->
+            val sel = i == page
+            Box(
+                Modifier
+                    .weight(1f)
+                    .background(if (sel) pal.fg else Color.Transparent)
+                    .clickable { onPage(i) }
+                    .padding(vertical = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(t, color = if (sel) pal.bg else pal.fg, fontWeight = FontWeight.Black, fontSize = 15.sp)
+            }
+        }
+    }
+}
+
+/** 집중 화면 맨 아래: 오늘 요약과, 잠겨 있을 때만 보이는 작은 긴급 해제 링크. */
+@Composable
+internal fun FocusFooter(s: UiState, pal: Palette, onUnlock: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "오늘 ${minutesText(s.todayDone)} · 연속 ${s.streak}일",
+            color = pal.muted,
+            fontSize = 13.sp,
+            modifier = Modifier.weight(1f),
+        )
+        if (s.canUnlock) {
+            if (s.unlockWait) {
+                Text("긴급 해제 · ${hhmm(s.nextUnlockAt)}부터", color = pal.muted, fontSize = 13.sp)
+            } else {
+                Text(
+                    "긴급 잠금 해제",
+                    color = pal.muted,
+                    fontSize = 13.sp,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .clickable(onClick = onUnlock)
+                        .padding(vertical = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+/** 최근 7일 집중 시간 막대그래프. week의 마지막이 오늘이다. */
+@Composable
+internal fun WeekChart(week: List<Int>, todayDone: Int, now: Long, pal: Palette) {
+    val vals = week.dropLast(1) + todayDone
+    val maxV = maxOf(vals.max(), 60)
+    val names = arrayOf("일", "월", "화", "수", "목", "금", "토")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .border(2.dp, pal.fg)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { Label("최근 7일", pal) }
+            Text("합계 ${minutesText(vals.sum())}", color = pal.fg, fontWeight = FontWeight.Black, fontSize = 13.sp)
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(170.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            vals.forEachIndexed { i, m ->
+                val today = i == vals.lastIndex
+                val day = java.util.Calendar.getInstance().apply {
+                    timeInMillis = now
+                    add(java.util.Calendar.DAY_OF_YEAR, i - vals.lastIndex)
+                }.get(java.util.Calendar.DAY_OF_WEEK) - 1
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.Bottom,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        if (m > 0) "%d:%02d".format(m / 60, m % 60) else "—",
+                        color = if (today) pal.fg else pal.muted,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height((m * 100f / maxV).coerceAtLeast(2f).dp)
+                            .background(if (today) pal.accent else pal.fg.copy(alpha = 0.35f)),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (today) "오늘" else names[day],
+                        color = if (today) pal.fg else pal.muted,
+                        fontSize = 12.sp,
+                        fontWeight = if (today) FontWeight.Black else FontWeight.Normal,
+                    )
+                }
+            }
+        }
     }
 }

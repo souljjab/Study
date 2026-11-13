@@ -127,7 +127,39 @@ final class Store {
         int streak = sp.getInt("streak", 0);
         if (last != today) streak = last == dayKey(-1) ? streak + 1 : 1;
         sp.edit().putInt("day", today).putInt("todayMin", total + minutes)
-                .putInt("lastDay", today).putInt("streak", streak).apply();
+                .putInt("lastDay", today).putInt("streak", streak)
+                .putString("focusDays", addDay(sp.getString("focusDays", "{}"), today, minutes, dayKey(-40)))
+                .apply();
+    }
+
+    /** 날짜별 집중 분 기록(JSON)에 minutes를 더하고, cutoff보다 오래된 날은 지운다. */
+    static String addDay(String json, int day, int minutes, int cutoff) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(json);
+            String k = String.valueOf(day);
+            o.put(k, o.optInt(k) + minutes);
+            List<String> old = new ArrayList<>();
+            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
+                String key = it.next();
+                if (key.compareTo(String.valueOf(cutoff)) < 0) old.add(key);
+            }
+            for (String key : old) o.remove(key);
+            return o.toString();
+        } catch (JSONException e) {
+            return json;
+        }
+    }
+
+    /** 최근 7일 집중 분. 마지막이 오늘. */
+    static int[] weekMinutes(Context c) {
+        int[] out = new int[7];
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(p(c).getString("focusDays", "{}"));
+            for (int i = 0; i < 7; i++) out[i] = o.optInt(String.valueOf(dayKey(i - 6)));
+        } catch (JSONException ignored) {
+        }
+        out[6] = Math.max(out[6], todayMinutes(c)); // 이 기록이 생기기 전에 쌓인 오늘 분량
+        return out;
     }
 
     static int todayMinutes(Context c) {

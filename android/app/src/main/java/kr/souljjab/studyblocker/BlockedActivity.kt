@@ -23,6 +23,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -34,7 +38,34 @@ class BlockedActivity : ComponentActivity() {
         enableEdgeToEdge()
         val label = intent.getStringExtra(EXTRA_LABEL) ?: "이 앱"
         onBackPressedDispatcher.addCallback(this) { goHome() }
-        setContent { StudyTheme { BlockedScreen(label, Store.blockEndMillis(this)) { goHome() } } }
+        val sched = Store.activeSchedule(this)
+        val why = blockReason(
+            Store.locked(this), Store.lockEnd(this), sched?.name,
+            sched?.activeEndMillis(java.util.Calendar.getInstance()) ?: 0, Store.manual(this),
+        )
+        // 잠긴 차단일 때만 긴급 해제 길을 보여 준다(1시간에 한 번 제한 중이면 시각만 안내).
+        val next = Unlock.nextAllowed(Store.unlocks(this))
+        val canUnlock = Store.lockActive(this) && !Store.unlocked(this)
+        val wait = next > System.currentTimeMillis()
+        val unlockLabel = when {
+            !canUnlock -> null
+            wait -> "긴급 해제 · ${hhmm(next)}부터 가능"
+            else -> "긴급 잠금 해제"
+        }
+        setContent {
+            StudyTheme {
+                BlockedScreen(label, Store.blockEndMillis(this), why, unlockLabel, !wait, { openUnlock() }) { goHome() }
+            }
+        }
+    }
+
+    private fun openUnlock() {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(MainActivity.EXTRA_UNLOCK, true),
+        )
+        finish()
     }
 
     private fun goHome() {
@@ -51,8 +82,25 @@ class BlockedActivity : ComponentActivity() {
     }
 }
 
+/** 무엇 때문에 막혔는지: "집중 모드 · 15:30까지", "'오후 자습' 예약 · 17:00까지", "수동 차단 중". */
+internal fun blockReason(locked: Boolean, lockEnd: Long, schedName: String?, schedEnd: Long, manual: Boolean): String {
+    val lines = ArrayList<String>()
+    if (locked) lines.add("집중 모드 · ${hhmm(lockEnd)}까지")
+    if (schedName != null) lines.add("'$schedName' 예약 · ${hhmm(schedEnd)}까지")
+    if (lines.isEmpty() && manual) lines.add("수동 차단 중")
+    return lines.joinToString("\n")
+}
+
 @Composable
-internal fun BlockedScreen(label: String, end: Long, onDone: () -> Unit) {
+internal fun BlockedScreen(
+    label: String,
+    end: Long,
+    why: String = "",
+    unlockLabel: String? = null,
+    unlockEnabled: Boolean = true,
+    onUnlock: () -> Unit = {},
+    onDone: () -> Unit,
+) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -73,6 +121,10 @@ internal fun BlockedScreen(label: String, end: Long, onDone: () -> Unit) {
         Label("Blocked", pal)
         Spacer(Modifier.height(8.dp))
         Text("$label 차단됨", color = pal.muted, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        if (why.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(why, color = pal.fg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
         Spacer(Modifier.weight(1f))
         Text(
             "딴짓\n금지.",
@@ -96,5 +148,18 @@ internal fun BlockedScreen(label: String, end: Long, onDone: () -> Unit) {
         }
         Spacer(Modifier.weight(1f))
         SharpButton("공부하러 가기", pal, onClick = onDone)
+        if (unlockLabel != null) {
+            Text(
+                unlockLabel,
+                color = pal.muted,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                textDecoration = if (unlockEnabled) TextDecoration.Underline else TextDecoration.None,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = unlockEnabled, onClick = onUnlock)
+                    .padding(top = 16.dp, bottom = 4.dp),
+            )
+        }
     }
 }

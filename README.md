@@ -30,6 +30,7 @@ hosts 파일(Windows)과 VPN·접근성(안드로이드)으로 유튜브·SNS·�
 
 ## 안드로이드 (APK)
 
+- 화면 구성: 맨 아래 메뉴로 **집중**(타이머·시작) / **목록**(사이트·앱·보안 폴더) / **예약** / **기록**(오늘·연속·최근 7일 그래프·긴급 해제 기록)을 오감
 - 설치: `dist/StudyBlocker.apk`를 폰으로 옮겨 설치 ("출처를 알 수 없는 앱 설치" 허용 필요)
 - 처음 차단을 켤 때 VPN 연결 요청이 뜨면 "확인" (DNS 질의만 처리하며, 다른 트래픽은 그대로 통과)
 - 앱 차단(유튜브·인스타 앱 등): 설정 > 접근성에서 '공부 집중 차단기'를 켜면, 차단 중 목록의 앱을 열 때 홈 화면으로 돌려보냄. '차단할 앱 선택'에서 앱 추가/삭제
@@ -57,6 +58,10 @@ hosts 파일(Windows)과 VPN·접근성(안드로이드)으로 유튜브·SNS·�
 > 안드로이드 13 이상에서 접근성 스위치가 회색으로 잠겨 있으면: 권한 화면의 **[앱 정보 열기]** → 오른쪽 위 ⋮ → **'제한된 설정 허용'** → 다시 접근성에서 켜기.
 > (파일로 직접 설치한 앱에 안드로이드가 거는 보안 제한입니다.)
 
-| 꺼짐(처음 실행) | 집중 중 | 수동 차단 | 차단 화면 | 권한 설정 | 예약 | 긴급 해제 |
-|---|---|---|---|---|---|---|
-| ![](docs/screenshots/off_firstRun.png) | ![](docs/screenshots/focus.png) | ![](docs/screenshots/manual.png) | ![](docs/screenshots/blocked.png) | ![](docs/screenshots/permissions.png) | ![](docs/screenshots/schedule.png) | ![](docs/screenshots/unlock.png) |
+| 꺼짐(처음 실행) | 집중 중 | 차단 화면 | 목록 |
+|---|---|---|---|
+| ![](docs/screenshots/off_firstRun.png) | ![](docs/screenshots/focus.png) | ![](docs/screenshots/blocked.png) | ![](docs/screenshots/list.png) |
+
+| 기록 | 예약 | 긴급 해제 중 | 권한 설정 |
+|---|---|---|---|
+| ![](docs/screenshots/records.png) | ![](docs/screenshots/schedule.png) | ![](docs/screenshots/unlock.png) | ![](docs/screenshots/permissions.png) |

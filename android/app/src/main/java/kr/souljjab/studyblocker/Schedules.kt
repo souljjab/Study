@@ -30,6 +30,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -177,31 +181,36 @@ private fun minuteOfDay(millis: Long): Int {
     return c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE)
 }
 
-@Composable
-private fun Stepper(value: Int, label: String, pal: Palette, onChange: (Int) -> Unit, step: Int, mod: Int) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        SmallBox("−", pal) { onChange(((value - step) % mod + mod) % mod) }
-        Text(
-            "%02d".format(value),
-            color = pal.fg,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Black,
-            fontSize = 22.sp,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-        SmallBox("+", pal) { onChange((value + step) % mod) }
-        Spacer(Modifier.width(4.dp))
-        Text(label, color = pal.muted, fontSize = 12.sp)
-    }
+/** "09"시 "30"분 → 570. 숫자가 아니거나 범위를 벗어나면 null. */
+internal fun parseTime(h: String, m: String): Int? {
+    val hh = h.toIntOrNull() ?: return null
+    val mm = m.toIntOrNull() ?: return null
+    return if (hh in 0..23 && mm in 0..59) hh * 60 + mm else null
 }
 
+private fun two(n: Int) = "%02d".format(n)
+
+/** 시·분을 숫자로 바로 입력하는 칸. */
 @Composable
-private fun TimeEditor(title: String, minute: Int, pal: Palette, enabled: Boolean, onChange: (Int) -> Unit) {
+internal fun TimeFields(title: String, h: String, m: String, pal: Palette, enabled: Boolean, onH: (String) -> Unit, onM: (String) -> Unit) {
+    val style = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 22.sp, textAlign = TextAlign.Center)
     Column(Modifier.alpha(if (enabled) 1f else 0.4f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Label(title, pal)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Stepper(minute / 60, "시", pal, { if (enabled) onChange(it * 60 + minute % 60) }, 1, 24)
-            Stepper(minute % 60, "분", pal, { if (enabled) onChange(minute / 60 * 60 + it) }, 10, 60)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf(Triple(h, onH, "시"), Triple(m, onM, "분")).forEach { (v, set, unit) ->
+                OutlinedTextField(
+                    value = v,
+                    onValueChange = { set(it.filter(Char::isDigit).take(2)) },
+                    readOnly = !enabled,
+                    singleLine = true,
+                    textStyle = style,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = RectangleShape,
+                    colors = sharpFieldColors(pal),
+                    modifier = Modifier.width(84.dp),
+                )
+                Text(unit, color = pal.muted, fontSize = 14.sp)
+            }
         }
     }
 }
@@ -218,9 +227,14 @@ internal fun ScheduleEditor(
 ) {
     var name by remember { mutableStateOf(initial.name) }
     var days by remember { mutableIntStateOf(initial.days) }
-    var start by remember { mutableIntStateOf(initial.start) }
-    var end by remember { mutableIntStateOf(initial.end) }
+    var sh by remember { mutableStateOf(two(initial.start / 60)) }
+    var sm by remember { mutableStateOf(two(initial.start % 60)) }
+    var eh by remember { mutableStateOf(two(initial.end / 60)) }
+    var em by remember { mutableStateOf(two(initial.end % 60)) }
+    val start = parseTime(sh, sm)
+    val end = parseTime(eh, em)
     val error = when {
+        start == null || end == null -> "시간을 00:00~23:59 사이 숫자로 입력하세요."
         days == 0 -> "요일을 하나 이상 고르세요."
         start == end -> "시작과 끝 시간이 같아요."
         else -> null
@@ -241,9 +255,9 @@ internal fun ScheduleEditor(
                     colors = sharpFieldColors(pal),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                TimeEditor("시작", start, pal, !lockedTimes) { start = it }
-                TimeEditor("끝", end, pal, !lockedTimes) { end = it }
-                if (end < start) Text("끝이 시작보다 이르면 다음 날 ${Schedule.hm(end)}까지 이어져요.", color = pal.muted, fontSize = 12.sp)
+                TimeFields("시작", sh, sm, pal, !lockedTimes, { sh = it }, { sm = it })
+                TimeFields("끝", eh, em, pal, !lockedTimes, { eh = it }, { em = it })
+                if (start != null && end != null && end < start) Text("끝이 시작보다 이르면 다음 날 ${Schedule.hm(end)}까지 이어져요.", color = pal.muted, fontSize = 12.sp)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Label("요일", pal)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -275,8 +289,8 @@ internal fun ScheduleEditor(
                     onSave(initial.copy().also {
                         it.name = name.trim().ifEmpty { "예약" }
                         it.days = days
-                        it.start = start
-                        it.end = end
+                        it.start = start ?: initial.start
+                        it.end = end ?: initial.end
                     })
                 },
             ) { Text("저장", color = pal.fg, fontWeight = FontWeight.Black) }
