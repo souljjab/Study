@@ -45,6 +45,30 @@ function TitleInput({ value, onCommit, size = 28, maxWidth = 420 }) {
     style=${`font-family:var(--font-heading);font-weight:500;font-size:${size}px;letter-spacing:-0.015em;color:var(--color-text);background:transparent;border:1px solid transparent;border-radius:var(--radius-md);padding:0 var(--space-2);margin-left:calc(var(--space-2) * -1);width:100%;max-width:${maxWidth}px;`} />`;
 }
 
+// "9:30", "930", "0930", "09:30" → "09:30". 올바른 시각이 아니면 null.
+export function normalizeTime(raw) {
+  const t = String(raw).trim();
+  const m = t.match(/^(\d{1,2}):(\d{2})$/) || t.match(/^(\d{1,2})(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  return h <= 23 && mi <= 59 ? `${pad(h)}:${pad(mi)}` : null;
+}
+
+// 24시간제로 고정한 시간 입력칸(기기 언어에 따라 오전/오후로 바뀌지 않게 직접 입력받는다).
+function TimeText({ value, onCommit, onInvalid }) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  const commit = () => {
+    const n = normalizeTime(v);
+    if (n === null) { setV(value); onInvalid(); return; }
+    setV(n);
+    if (n !== value) onCommit(n);
+  };
+  return html`<input class="input" value=${v} inputmode="numeric" maxlength="5" placeholder="09:00" aria-label="시간 (24시간제)"
+    onInput=${(e) => setV(e.target.value.replace(/[^0-9:]/g, ''))} onBlur=${commit} onKeyDown=${(e) => e.key === 'Enter' && e.target.blur()}
+    style="width:74px;min-height:36px;font-size:18px;font-variant-numeric:tabular-nums;text-align:center;padding:2px 8px;" />`;
+}
+
 function App() {
   const [S, setS] = useState(null);
   const [view, setView] = useState('focus');
@@ -557,9 +581,8 @@ function App() {
     if (!sc.days.length) return html`<span class="tag tag-neutral">요일을 고르세요</span>`;
     return html`<span class="tag tag-neutral">다음 · ${sc.next}</span>`;
   };
-  const timeInput = (sc, key) => html`<input type="time" class="input" key=${`${sc.id}-${key}-${sc[key]}-${rev}`} value=${sc[key]}
-    onChange=${(e) => e.target.value && e.target.value !== sc[key] && updateSchedule(sc, { [key]: e.target.value })}
-    style="width:auto;min-height:36px;font-size:18px;font-variant-numeric:tabular-nums;color-scheme:dark;padding:2px 8px;" />`;
+  const timeInput = (sc, key) => html`<${TimeText} key=${`${sc.id}-${key}-${sc[key]}-${rev}`} value=${sc[key]}
+    onCommit=${(t) => updateSchedule(sc, { [key]: t })} onInvalid=${() => setSchedError('시간은 24시간제로 입력하세요. 예: 09:00, 23:30')} />`;
   const scheduleCard = (sc) => {
     const overnight = sc.end < sc.start;
     return html`
@@ -635,7 +658,6 @@ function App() {
     { label: '이번 주 합계', value: dur(week.reduce((a, b) => a + b, 0) * 60) },
     { label: '오늘 세션', value: `${totalSessions}회` },
     { label: '막은 접속 시도', value: `${S.todayHits}회` },
-    { label: '긴급 해제 (7일)', value: `${S.unlocks7d}회` },
   ];
   const statsView = html`
     <header style="margin-bottom:var(--space-8);">
@@ -687,7 +709,10 @@ function App() {
       </tbody>
     </table>
     ${S.sessions.length === 0 && html`<div class="text-muted" style="padding:var(--space-6) var(--space-2);font-size:14px;">오늘 끝낸 세션이 아직 없어요.</div>`}
-    <h6 class="text-muted" style="margin:var(--space-8) 0 var(--space-3);">긴급 잠금 해제 기록</h6>
+    <div style="display:flex;align-items:baseline;gap:var(--space-3);margin:var(--space-8) 0 var(--space-3);">
+      <h6 class="text-muted" style="margin:0;flex:1;">긴급 잠금 해제 기록</h6>
+      <span class="text-muted" style="font-size:12px;font-variant-numeric:tabular-nums;">최근 7일 ${S.unlocks7d}회 · 전체 ${S.unlocks.length}회</span>
+    </div>
     <table class="table">
       <thead><tr><th style="width:170px;">일시</th><th style="width:260px;">해제 시간</th><th>사유</th></tr></thead>
       <tbody>
