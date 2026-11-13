@@ -73,6 +73,13 @@ final class Store {
         return out;
     }
 
+    /** 차단 중에 삼성 보안 폴더도 막을지. 기본으로 켜져 있다. */
+    static boolean secureFolderBlock(Context c) { return p(c).getBoolean("secureFolderBlock", true); }
+
+    static void setSecureFolderBlock(Context c, boolean v) {
+        p(c).edit().putBoolean("secureFolderBlock", v).apply();
+    }
+
     static Set<String> apps(Context c) {
         String raw = p(c).getString("apps", null);
         Set<String> out = new TreeSet<>();

@@ -103,6 +103,8 @@ internal data class UiState(
     val schedNext: Map<Long, String> = emptyMap(),
     val unlockUntil: Long = 0,
     val unlocks: List<Unlock> = emptyList(),
+    val secureFolder: Boolean = true,
+    val secureFolderAvailable: Boolean = false,
 ) {
     val unlocking: Boolean get() = unlockUntil > now
 
@@ -148,6 +150,8 @@ internal fun readState(c: Context) = UiState(
         schedNext = list.associate { it.id to it.nextLabel(now) },
         unlockUntil = Store.unlockUntil(c),
         unlocks = Store.unlocks(c),
+        secureFolder = Store.secureFolderBlock(c),
+        secureFolderAvailable = SecureFolder.available(c),
     )
 }
 
@@ -363,6 +367,14 @@ internal fun MainScreen() {
                 SiteRow(d, pal, deletable = !s.listLocked) { toDelete = d }
             }
         } else if (tab == 1) {
+            if (s.secureFolderAvailable) {
+                item {
+                    SecureFolderRow(s.secureFolder, s.listLocked, pal) { on ->
+                        Store.setSecureFolderBlock(ctx, on)
+                        version++
+                    }
+                }
+            }
             if (apps.isEmpty()) item { Text("앱 목록 불러오는 중…", color = pal.muted) }
             items(apps, key = { it.pkg }) { a ->
                 AppRow(a, a.pkg in s.apps, s.listLocked, pal) { on ->
@@ -733,5 +745,28 @@ internal fun AppRow(a: AppItem, on: Boolean, locked: Boolean, pal: Palette, onCh
                 .height(1.dp)
                 .background(pal.muted),
         )
+    }
+}
+
+/** 차단 중에 삼성 보안 폴더도 막을지 정하는 줄. 집중 중·예약 시간에는 끌 수 없다. */
+@Composable
+internal fun SecureFolderRow(on: Boolean, locked: Boolean, pal: Palette, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .border(2.dp, pal.fg)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("삼성 보안 폴더 차단", color = pal.fg, fontWeight = FontWeight.Black)
+            Text(
+                "차단 중에는 보안 폴더와 그 안의 앱을 열 수 없어요. 보안 폴더 안에는 웹 차단이 닿지 않아서 통째로 막아요.",
+                color = pal.muted,
+                fontSize = 12.sp,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        SquareToggle(on, pal, enabled = !(locked && on), onChange = onChange)
     }
 }

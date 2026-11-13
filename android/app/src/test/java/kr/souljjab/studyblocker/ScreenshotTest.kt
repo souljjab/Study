@@ -151,5 +151,23 @@ class ScreenshotTest {
     }
 
     @Test
+    fun secureFolder() {
+        val s = state(locked = true)
+        val pal = palette(s.mode, false)
+        paparazzi.snapshot {
+            StudyTheme {
+                Column(
+                    Modifier.fillMaxSize().background(pal.bg).padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Header(s, pal) {}
+                    Tabs(1, s, pal) {}
+                    SecureFolderRow(on = true, locked = true, pal = pal) {}
+                }
+            }
+        }
+    }
+
+    @Test
     fun blocked() = paparazzi.snapshot { StudyTheme { BlockedScreen("YouTube", System.currentTimeMillis() + (29 * 60 + 30) * 1000L) {} } }
 }
