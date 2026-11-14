@@ -70,6 +70,54 @@ class ScreenshotTest {
     private fun FocusPage(s: UiState) = WithNav(0, palette(s.mode, false)) { Screen(s) }
 
     @Test
+    fun hardSetup() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_5.copy(screenHeight = 3000))
+        val s = state()
+        val pal = palette(s.mode, false)
+        paparazzi.snapshot {
+            StudyTheme {
+                Column(
+                    Modifier.fillMaxSize().background(pal.bg).padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Header(s, pal) {}
+                    SharpButton("지금 바로 차단 (수동)", pal, filled = false) {}
+                    FocusFooter(s, pal) {}
+                    HardSetupCard(listOf("카카오톡", "계산기", "네이버 사전"), 60, "", true, pal, {}, {}, {}, {})
+                }
+            }
+        }
+    }
+
+    @Test
+    fun hardActive() {
+        val s = state().copy(hardStart = now - 40 * 60_000L, hardEnd = now + (79 * 60 + 12) * 1000L, hardApps = setOf("a", "b", "c"))
+        val pal = palette(s.mode, false)
+        paparazzi.snapshot {
+            StudyTheme {
+                WithNav(0, pal) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Header(s, pal) {}
+                        TimerBlock(s, pal, 50)
+                        HardActiveCard(listOf("카카오톡", "계산기", "네이버 사전"), pal)
+                        FocusFooter(s, pal) {}
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun hardBlocked() = paparazzi.snapshot {
+        StudyTheme {
+            BlockedScreen(
+                "YouTube", System.currentTimeMillis() + (79 * 60 + 12) * 1000L,
+                why = "빡집중 모드 · 16:20까지\n쓸 수 있는 앱: 카카오톡, 계산기, 네이버 사전", mode = Mode.HARD,
+            ) {}
+        }
+    }
+
+    @Test
     fun listPage() {
         val s = state()
         val pal = palette(s.mode, false)

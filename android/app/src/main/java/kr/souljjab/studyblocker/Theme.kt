@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
 /** 화면 상태. 상태마다 배경색이 바뀐다. */
-enum class Mode { OFF, FOCUS, MANUAL, SCHEDULE }
+enum class Mode { OFF, FOCUS, MANUAL, SCHEDULE, HARD }
 
 data class Palette(
     val bg: Color,
@@ -49,11 +49,13 @@ val Ink = Color(0xFF121212)
 val Signal = Color(0xFF2FE39A)
 val Amber = Color(0xFFF2A900)
 val Pine = Color(0xFF0C2E26)
+val Crimson = Color(0xFF4A0A14)
 
 fun palette(mode: Mode, dark: Boolean): Palette = when (mode) {
     Mode.FOCUS -> Palette(Navy, Color.White, Color(0xFF8FA3C0), Signal, Ink, false)
     Mode.MANUAL -> Palette(Amber, Ink, Color(0xFF5C4300), Ink, Amber, true)
     Mode.SCHEDULE -> Palette(Pine, Color.White, Color(0xFF8DB8AA), Signal, Ink, false)
+    Mode.HARD -> Palette(Crimson, Color.White, Color(0xFFD9A3AB), Color.White, Crimson, false)
     Mode.OFF -> if (dark) {
         Palette(Ink, Paper, Color(0xFF8A8A8A), Paper, Ink, false)
     } else {

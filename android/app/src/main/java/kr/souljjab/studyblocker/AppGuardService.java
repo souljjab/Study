@@ -19,6 +19,9 @@ public class AppGuardService extends AccessibilityService {
     private long cacheAt;
     /** 설치된 앱을 전부 볼 수 있는지(못 보면 '본체에 없는 앱' 판단을 쓰지 않는다). */
     private Boolean seesAllPackages;
+    /** 빡집중 중에도 열어 두는 시스템 패키지(홈·키보드·전화 등). */
+    private java.util.Set<String> hardSystem;
+    private long hardSystemAt;
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
@@ -28,22 +31,42 @@ public class AppGuardService extends AccessibilityService {
         // 예약 시각에 백그라운드 시작이 막혔다면 여기서 웹 차단(VPN)을 다시 켠다.
         ScheduleAlarm.ensureBlocking(this);
         String pkg = cs.toString();
+        if (Store.hardActive(this)) {
+            // 빡집중: 고른 앱과 시스템 화면 말고는 전부 막는다.
+            if (!HardMode.allowed(pkg, getPackageName(), Store.hardApps(this), hardSystem())) bounce(labelOf(pkg));
+            return;
+        }
         boolean sfBlock = Store.secureFolderBlock(this);
         int v = SecureFolder.verdict(pkg, getPackageName(), Store.apps(this), sfBlock,
                 !sfBlock || installedHere(pkg));
         if (v == SecureFolder.PASS) return;
-        String label = v == SecureFolder.SECURE_FOLDER ? SecureFolder.LABEL : pkg;
-        if (v == SecureFolder.BLOCKED_APP) {
-            try {
-                label = getPackageManager().getApplicationLabel(
-                        getPackageManager().getApplicationInfo(pkg, 0)).toString();
-            } catch (Exception ignored) {
-            }
+        bounce(v == SecureFolder.SECURE_FOLDER ? SecureFolder.LABEL : labelOf(pkg));
+    }
+
+    private String labelOf(String pkg) {
+        try {
+            return getPackageManager().getApplicationLabel(
+                    getPackageManager().getApplicationInfo(pkg, 0)).toString();
+        } catch (Exception e) {
+            return pkg;
         }
+    }
+
+    /** 홈으로 보내고 차단 화면을 띄운다. */
+    private void bounce(String label) {
         performGlobalAction(GLOBAL_ACTION_HOME);
         startActivity(new Intent(this, BlockedActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(BlockedActivity.EXTRA_LABEL, label));
+    }
+
+    private java.util.Set<String> hardSystem() {
+        long now = System.currentTimeMillis();
+        if (hardSystem == null || now - hardSystemAt > 60_000) { // 키보드·런처가 바뀌는 것을 반영
+            hardSystem = HardMode.systemAllowed(this);
+            hardSystemAt = now;
+        }
+        return hardSystem;
     }
 
     private boolean installedHere(String pkg) {

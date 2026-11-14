@@ -39,13 +39,18 @@ class BlockedActivity : ComponentActivity() {
         val label = intent.getStringExtra(EXTRA_LABEL) ?: "이 앱"
         onBackPressedDispatcher.addCallback(this) { goHome() }
         val sched = Store.activeSchedule(this)
+        val hard = Store.hardActive(this)
+        val hardNames = Store.hardApps(this).map { pkg ->
+            runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+        }
         val why = blockReason(
             Store.locked(this), Store.lockEnd(this), sched?.name,
             sched?.activeEndMillis(java.util.Calendar.getInstance()) ?: 0, Store.manual(this),
+            if (hard) Store.hardEnd(this) else 0, hardNames,
         )
         // 잠긴 차단일 때만 긴급 해제 길을 보여 준다(1시간에 한 번 제한 중이면 시각만 안내).
         val next = Unlock.nextAllowed(Store.unlocks(this))
-        val canUnlock = Store.lockActive(this) && !Store.unlocked(this)
+        val canUnlock = Store.lockActive(this) && !Store.unlocked(this) && !hard
         val wait = next > System.currentTimeMillis()
         val unlockLabel = when {
             !canUnlock -> null
@@ -54,7 +59,10 @@ class BlockedActivity : ComponentActivity() {
         }
         setContent {
             StudyTheme {
-                BlockedScreen(label, Store.blockEndMillis(this), why, unlockLabel, !wait, { openUnlock() }) { goHome() }
+                BlockedScreen(
+                    label, if (hard) Store.hardEnd(this) else Store.blockEndMillis(this), why, unlockLabel, !wait,
+                    { openUnlock() }, if (hard) Mode.HARD else Mode.FOCUS,
+                ) { goHome() }
             }
         }
     }
@@ -83,7 +91,19 @@ class BlockedActivity : ComponentActivity() {
 }
 
 /** 무엇 때문에 막혔는지: "집중 모드 · 15:30까지", "'오후 자습' 예약 · 17:00까지", "수동 차단 중". */
-internal fun blockReason(locked: Boolean, lockEnd: Long, schedName: String?, schedEnd: Long, manual: Boolean): String {
+internal fun blockReason(
+    locked: Boolean,
+    lockEnd: Long,
+    schedName: String?,
+    schedEnd: Long,
+    manual: Boolean,
+    hardEnd: Long = 0,
+    hardApps: List<String> = emptyList(),
+): String {
+    if (hardEnd > 0) {
+        val apps = if (hardApps.isEmpty()) "쓸 수 있는 앱 없음 (전화만 가능)" else "쓸 수 있는 앱: ${hardApps.joinToString(", ")}"
+        return "빡집중 모드 · ${hhmm(hardEnd)}까지\n$apps"
+    }
     val lines = ArrayList<String>()
     if (locked) lines.add("집중 모드 · ${hhmm(lockEnd)}까지")
     if (schedName != null) lines.add("'$schedName' 예약 · ${hhmm(schedEnd)}까지")
@@ -99,6 +119,7 @@ internal fun BlockedScreen(
     unlockLabel: String? = null,
     unlockEnabled: Boolean = true,
     onUnlock: () -> Unit = {},
+    mode: Mode = Mode.FOCUS,
     onDone: () -> Unit,
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -108,7 +129,7 @@ internal fun BlockedScreen(
             now = System.currentTimeMillis()
         }
     }
-    val pal = palette(Mode.FOCUS, true)
+    val pal = palette(mode, true)
     SystemBars(pal.lightBg)
 
     Column(
@@ -147,7 +168,7 @@ internal fun BlockedScreen(
             Text("수동 차단 중", color = pal.accent, fontSize = 24.sp, fontWeight = FontWeight.Black)
         }
         Spacer(Modifier.weight(1f))
-        SharpButton("공부하러 가기", pal, onClick = onDone)
+        SharpButton(if (mode == Mode.HARD) "홈으로" else "공부하러 가기", pal, onClick = onDone)
         if (unlockLabel != null) {
             Text(
                 unlockLabel,

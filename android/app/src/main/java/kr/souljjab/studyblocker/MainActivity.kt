@@ -120,6 +120,9 @@ internal data class UiState(
     val secureFolder: Boolean = true,
     val secureFolderAvailable: Boolean = false,
     val week: List<Int> = List(7) { 0 }, // 최근 7일 집중 분, 마지막이 오늘
+    val hardStart: Long = 0,
+    val hardEnd: Long = 0,
+    val hardApps: Set<String> = emptySet(),
 ) {
     /** 오늘 실제로 집중한 분(진행 중인 집중의 남은 시간은 뺀다). */
     val todayDone: Int
@@ -128,7 +131,10 @@ internal data class UiState(
     val unlocking: Boolean get() = unlockUntil > now
 
     /** 긴급 해제 버튼을 보여 줄지: 잠긴 차단이 있고 이미 해제 중이 아닐 때. */
-    val canUnlock: Boolean get() = (locked || activeSched != null) && !unlocking
+    /** 빡집중 모드 진행 중. 이때는 아무것도 바꿀 수 없고 긴급 해제도 없다. */
+    val hard: Boolean get() = hardEnd > now
+
+    val canUnlock: Boolean get() = (locked || activeSched != null) && !unlocking && !hard
 
     /** 1시간에 한 번 제한: 다음 긴급 해제가 가능한 시각. 지금 가능하면 now 이하. */
     val nextUnlockAt: Long get() = Unlock.nextAllowed(unlocks)
@@ -136,6 +142,7 @@ internal data class UiState(
 
     val mode: Mode
         get() = when {
+            hard -> Mode.HARD
             locked -> Mode.FOCUS
             activeSched != null -> Mode.SCHEDULE
             manual -> Mode.MANUAL
@@ -143,7 +150,7 @@ internal data class UiState(
         }
 
     /** 집중 중이거나 예약 시간이면 목록에서 빼는 것을 막는다. */
-    val listLocked: Boolean get() = locked || activeSched != null
+    val listLocked: Boolean get() = locked || activeSched != null || hard
 }
 
 internal fun readState(c: Context) = UiState(
@@ -172,6 +179,9 @@ internal fun readState(c: Context) = UiState(
         secureFolder = Store.secureFolderBlock(c),
         secureFolderAvailable = SecureFolder.available(c),
         week = Store.weekMinutes(c).toList(),
+        hardStart = Store.hardStart(c),
+        hardEnd = Store.hardEnd(c),
+        hardApps = Store.hardApps(c),
     )
 }
 
@@ -255,6 +265,11 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
     var editing by remember { mutableStateOf<Pair<Schedule, Boolean>?>(null) } // 예약, 새로 만드는지
     var schedDelete by remember { mutableStateOf<Schedule?>(null) }
     var unlockOpen by remember { mutableStateOf(false) }
+    var hardPreset by rememberSaveable { mutableIntStateOf(60) } // -1 = 직접 입력
+    var hardCustom by rememberSaveable { mutableStateOf("") }
+    val hardMinutes = if (hardPreset > 0) hardPreset else hardCustom.toIntOrNull() ?: 0
+    var hardPick by remember { mutableStateOf(false) }
+    var hardConfirm by remember { mutableStateOf(false) }
     LaunchedEffect(unlockRequest) {
         if (unlockRequest) {
             if (s.canUnlock && !s.unlockWait) unlockOpen = true
@@ -264,6 +279,8 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
     val apps by produceState(emptyList<AppItem>()) {
         value = withContext(Dispatchers.IO) { loadApps(ctx) }
     }
+
+    val appLabels = remember(apps) { apps.associate { it.pkg to it.label } }
 
     fun startFocus() {
         if (minutes !in 1..1440) {
@@ -311,7 +328,7 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item { Header(s, pal) { showPerms = true } }
-            if (s.unlocking) {
+            if (s.unlocking && !s.hard) {
                 item {
                     UnlockBanner(s.unlockUntil - s.now, s.unlocks.firstOrNull()?.reason ?: "", pal) {
                         Store.endUnlock(ctx)
@@ -322,7 +339,11 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
             }
             if (!s.perms.requiredDone) item { PermBanner(s.perms, pal) { showPerms = true } }
             when (page) {
-                0 -> {
+                0 -> if (s.hard) {
+                    item { TimerBlock(s, pal, minutes) }
+                    item { HardActiveCard(s.hardApps.map { appLabels[it] ?: it }, pal) }
+                    item { FocusFooter(s, pal) {} }
+                } else {
                     item { TimerBlock(s, pal, minutes) }
                     item {
                         Presets(preset, custom, pal, onPreset = { preset = it }, onCustom = { custom = it })
@@ -354,6 +375,15 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
                         }
                     }
                     item { FocusFooter(s, pal) { unlockOpen = true } }
+                    item {
+                        HardSetupCard(
+                            s.hardApps.map { appLabels[it] ?: it }, hardPreset, hardCustom, s.perms.acc, pal,
+                            onPick = { hardPick = true },
+                            onPreset = { hardPreset = it },
+                            onCustom = { hardCustom = it },
+                            onStart = { hardConfirm = true },
+                        )
+                    }
                 }
                 1 -> {
                     item { Tabs(tab, s, pal) { tab = it } }
@@ -459,6 +489,21 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
         BottomNav(page, pal) { page = it }
     }
 
+    if (hardPick) {
+        HardAppPicker(apps, s.hardApps, pal, onSave = { Store.setHardApps(ctx, it); hardPick = false; version++ }) { hardPick = false }
+    }
+    if (hardConfirm) {
+        HardConfirmDialog(
+            hardMinutes, s.hardApps.map { appLabels[it] ?: it }, pal,
+            onStart = {
+                hardConfirm = false
+                // 웹 차단(VPN)도 함께 켠다. VPN 권한이 없어도 앱 잠금은 시작한다.
+                val err = Store.startHard(ctx, hardMinutes)
+                if (err != null) toast(ctx, err) else withVpn { startBlocking() }
+                version++
+            },
+        ) { hardConfirm = false }
+    }
     if (unlockOpen) {
         UnlockDialog(
             pal,
@@ -538,6 +583,7 @@ internal fun Header(s: UiState, pal: Palette, onPerms: () -> Unit) {
         val tag = when (s.mode) {
             Mode.FOCUS -> "FOCUS"
             Mode.MANUAL -> "BLOCK"
+            Mode.HARD -> "빡집중"
             Mode.SCHEDULE -> "AUTO"
             Mode.OFF -> "OFF"
         }
@@ -591,6 +637,17 @@ internal fun TimerBlock(s: UiState, pal: Palette, minutes: Int) {
                 Bar(left.toFloat() / total.coerceAtLeast(1), pal)
                 Text(
                     if (s.unlocking) "긴급 해제 중이에요. 타이머는 계속 돌아요." else "딴짓 금지. 지금은 공부할 시간.",
+                    color = pal.fg,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Mode.HARD -> {
+                val left = s.hardEnd - s.now
+                Label("빡집중 모드", pal)
+                BigDigits(fmt(left / 1000), pal.fg)
+                Bar(left.toFloat() / (s.hardEnd - s.hardStart).coerceAtLeast(1), pal)
+                Text(
+                    "${hhmm(s.hardEnd)}까지 고른 앱만 쓸 수 있어요. 끝날 때까지 해제할 수 없어요.",
                     color = pal.fg,
                     fontWeight = FontWeight.Bold,
                 )

@@ -174,7 +174,39 @@ final class Store {
     static boolean locked(Context c) { return lockEnd(c) > System.currentTimeMillis(); }
 
     static boolean shouldBlock(Context c) {
-        return !unlocked(c) && (manual(c) || locked(c) || activeSchedule(c) != null);
+        // 빡집중 중에는 긴급 해제가 있어도 차단한다.
+        return hardActive(c) || (!unlocked(c) && (manual(c) || locked(c) || activeSchedule(c) != null));
+    }
+
+    // ── 빡집중 모드 ──
+
+    static long hardEnd(Context c) { return p(c).getLong("hardEnd", 0); }
+
+    static long hardStart(Context c) { return p(c).getLong("hardStart", 0); }
+
+    static boolean hardActive(Context c) { return hardEnd(c) > System.currentTimeMillis(); }
+
+    /** 빡집중에서 쓸 수 있게 고른 앱(최대 3개). */
+    static Set<String> hardApps(Context c) {
+        Set<String> out = new TreeSet<>();
+        for (String s : p(c).getString("hardApps", "").split("\n")) if (!s.isEmpty()) out.add(s);
+        return out;
+    }
+
+    /** 빡집중 중에는 허용 앱을 바꿀 수 없다. */
+    static boolean setHardApps(Context c, Set<String> apps) {
+        if (hardActive(c) || apps.size() > HardMode.MAX_APPS) return false;
+        p(c).edit().putString("hardApps", String.join("\n", apps)).commit();
+        return true;
+    }
+
+    /** 빡집중을 시작한다. 실패하면 이유를, 성공하면 null. 시작하면 끝날 때까지 되돌릴 방법이 없다. */
+    static String startHard(Context c, int minutes) {
+        String err = HardMode.error(minutes, hardApps(c).size(), AppGuardService.isEnabled(c), hardActive(c));
+        if (err != null) return err;
+        long now = System.currentTimeMillis();
+        p(c).edit().putLong("hardStart", now).putLong("hardEnd", now + minutes * 60_000L).commit();
+        return null;
     }
 
     // ── 긴급 잠금 해제 ──
@@ -209,6 +241,7 @@ final class Store {
 
     /** 긴급 해제를 시작한다. 실패하면 이유를, 성공하면 null을 돌려준다. */
     static String emergencyUnlock(Context c, String reason, int minutes) {
+        if (hardActive(c)) return "빡집중 모드에서는 긴급 해제를 할 수 없어요.";
         if (unlocked(c)) return "이미 긴급 해제 중이에요.";
         if (!lockActive(c)) return "지금은 잠긴 차단이 없어요.";
         String r = Unlock.normalize(reason);
@@ -285,7 +318,7 @@ final class Store {
 
     /** 차단이 끝나는 시각: 집중 모드와 예약 중 더 늦은 쪽. 수동 차단만이면 0. */
     static long blockEndMillis(Context c) {
-        long end = lockEnd(c);
+        long end = Math.max(lockEnd(c), hardEnd(c));
         Schedule s = activeSchedule(c);
         if (s != null) end = Math.max(end, s.activeEndMillis(Calendar.getInstance()));
         return end;
