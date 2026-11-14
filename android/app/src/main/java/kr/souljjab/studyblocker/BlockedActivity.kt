@@ -76,6 +76,13 @@ class BlockedActivity : ComponentActivity() {
         finish()
     }
 
+    /** 차단 화면이 떠 있는 동안 다른 차단 앱이 열리면 새 내용으로 다시 그린다. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        recreate()
+    }
+
     private fun goHome() {
         startActivity(
             Intent(Intent.ACTION_MAIN)
