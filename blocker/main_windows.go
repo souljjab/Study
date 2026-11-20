@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -24,7 +25,14 @@ func init() { runtime.LockOSThread() }
 
 func main() {
 	startHidden := slices.Contains(os.Args[1:], "--tray")
-	if !singleInstance() {
+	afterUpdate := slices.Contains(os.Args[1:], "--after-update")
+	if afterUpdate {
+		// 새 버전으로 바뀐 직후: 옛 프로그램이 끝나기를 기다린다.
+		if !waitSingleInstance(30 * time.Second) {
+			return
+		}
+		go cleanupOldExe()
+	} else if !singleInstance() {
 		// 이미 떠 있으면 그 창을 앞으로 가져온다.
 		if h := findMainWindow(); h != 0 {
 			bringToFront(h)
@@ -91,6 +99,32 @@ func main() {
 	app.OnHide = func() { w.Dispatch(func() { hideWindow(hwnd) }) }
 	app.OnQuit = func() { w.Dispatch(w.Terminate) }
 	app.OnLaunch = setAutostart
+
+	// 자동 업데이트: 받아 두고, 설정에서 누르거나(또는 트레이에 있고 타이머가 멈췄을 때) 바꾼다.
+	updater := NewUpdater(filepath.Join(dataDir, "update"))
+	app.Updater = updater
+	var updating atomic.Bool
+	app.OnApplyUpdate = func() error {
+		path := updater.ReadyPath()
+		if path == "" || updating.Load() {
+			return nil
+		}
+		args := []string{"--after-update"}
+		if !isWindowVisible(hwnd) {
+			args = append(args, "--tray")
+		}
+		eng.Save(time.Now())
+		if err := installUpdate(path, args...); err != nil {
+			return err
+		}
+		// 차단(hosts)은 그대로 둔 채 끝낸다. 새 버전이 바로 이어받는다.
+		updating.Store(true)
+		w.Dispatch(w.Terminate)
+		return nil
+	}
+	if afterUpdate {
+		w.Dispatch(func() { tray.Notify(windowTitle, "새 버전 "+appVersion+"으로 업데이트했어요.") })
+	}
 	app.syncLaunch()
 	eng.OnPhase = func(kind string) {
 		if eng.SoundOn() {
@@ -111,8 +145,27 @@ func main() {
 	w.Navigate(fmt.Sprintf("http://%s/", ln.Addr().String()))
 
 	go func() {
+		started := time.Now()
+		notified, tried := "", ""
 		for now := range time.Tick(time.Second) {
 			app.Step(now)
+			if s := eng.View(now).Settings; !s.ManualUpdate {
+				// 켜고 1분 뒤 처음 확인하고, 그 뒤로 6시간마다 확인한다.
+				if now.Sub(started) > time.Minute && now.Sub(updater.LastCheck()) > 6*time.Hour {
+					go updater.Check(context.Background())
+				}
+				// 창이 숨겨져 있고 타이머가 멈춰 있을 때만 알아서 바꾼다(공부를 방해하지 않게).
+				if p := updater.ReadyPath(); p != "" && p != tried && !isWindowVisible(hwnd) && !eng.View(now).Timer.Running {
+					tried = p // 실패해도 같은 파일로 매초 다시 시도하지 않는다
+					_ = app.OnApplyUpdate()
+				}
+			}
+			if uv := updater.View(); uv.State == "ready" && uv.Latest != notified {
+				notified = uv.Latest
+				w.Dispatch(func() {
+					tray.Notify(windowTitle, "새 버전 "+uv.Latest+"을 받았어요. 설정에서 업데이트할 수 있어요.")
+				})
+			}
 			eval("window.__push && window.__push(" + string(app.StateJSON()) + ")")
 			v := eng.View(now)
 			tip := windowTitle + " · 집중 모드 꺼짐"
@@ -136,6 +189,8 @@ func main() {
 
 	tray.Remove()
 	hits.Close()
-	app.ClearHosts()
+	if !updating.Load() {
+		app.ClearHosts()
+	}
 	eng.Save(time.Now())
 }

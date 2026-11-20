@@ -18,6 +18,7 @@ func main() {
 	state := flag.String("state", filepath.Join(os.TempDir(), "mollip-dev.json"), "state file")
 	demo := flag.Bool("demo", false, "seed demo data")
 	hitPorts := flag.Bool("hits", false, "listen for blocked hits on 127.0.0.1:8443/8080")
+	updateURL := flag.String("update-url", "", "update manifest URL (for testing the updater UI)")
 	flag.Parse()
 	if *demo {
 		os.Remove(*state)
@@ -27,6 +28,13 @@ func main() {
 		seedDemo(eng, time.Now())
 	}
 	a := NewApp(eng)
+	if *updateURL != "" {
+		a.Updater = NewUpdater(filepath.Join(os.TempDir(), "mollip-dev-update"))
+		a.Updater.ManifestURL = *updateURL
+		a.OnApplyUpdate = func() error {
+			return fmt.Errorf("개발 서버에서는 설치하지 않아요(받아 둔 파일: %s)", a.Updater.ReadyPath())
+		}
+	}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		fmt.Println(err)

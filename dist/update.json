@@ -1,0 +1,17 @@
+{
+  "windows": {
+    "version": "2.1.0",
+    "url": "https://raw.githubusercontent.com/souljjab/Study/HEAD/dist/StudyBlocker.exe",
+    "sha256": "49a785959788ae60650f55c8d01c85fe98cd96e94e3b3e9899a8fdbd074f2858",
+    "size": 7929856,
+    "notes": "자동 업데이트 기능 추가"
+  },
+  "android": {
+    "versionCode": 3,
+    "versionName": "2.1",
+    "url": "https://raw.githubusercontent.com/souljjab/Study/HEAD/dist/StudyBlocker.apk",
+    "sha256": "1cfd0eef503594e2cbd3c1a05e75eb2323f54e4379e8137007826957b2eebfb5",
+    "size": 1151755,
+    "notes": "자동 업데이트 기능 추가"
+  }
+}

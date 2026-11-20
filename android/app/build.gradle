@@ -13,8 +13,8 @@ android {
         applicationId 'kr.souljjab.studyblocker'
         minSdk 24
         targetSdk 34
-        versionCode 2
-        versionName '2.0'
+        versionCode 3
+        versionName '2.1'
     }
     signingConfigs {
         // 저장소에 포함된 키로 서명해, 어느 환경에서 빌드해도 기존 앱 위에 업데이트 설치가 되게 한다.
@@ -35,6 +35,7 @@ android {
     }
     buildFeatures {
         compose true
+        buildConfig true
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

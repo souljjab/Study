@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"html"
 	"strings"
 	"sync"
@@ -28,6 +30,9 @@ type App struct {
 	OnHide   func()
 	OnQuit   func()
 	OnPopup  func() // 차단 화면을 띄울 때 창을 앞으로
+	Updater  *Updater
+	// OnApplyUpdate는 받아 둔 새 버전으로 바꾸고 다시 시작한다.
+	OnApplyUpdate func() error
 }
 
 func NewApp(eng *Engine) *App {
@@ -112,6 +117,16 @@ func (a *App) Call(action string, payload []byte) callResult {
 		if a.OnHide != nil {
 			a.OnHide()
 		}
+	case "checkUpdate":
+		if a.Updater != nil {
+			go a.Updater.Check(context.Background())
+		}
+	case "applyUpdate":
+		if a.OnApplyUpdate == nil || a.Updater == nil || a.Updater.ReadyPath() == "" {
+			err = errors.New("설치할 업데이트가 없어요.")
+		} else {
+			err = a.OnApplyUpdate()
+		}
 	case "quit":
 		if !a.eng.QuitAllowed() {
 			err = errLocked
@@ -147,9 +162,14 @@ func (a *App) StateJSON() json.RawMessage {
 	a.mu.Lock()
 	extra := struct {
 		View
-		HostsError string `json:"hostsError"`
-		AttemptsOn bool   `json:"attemptsOn"`
-	}{v, a.hostsErr, a.attemptsOn}
+		HostsError string      `json:"hostsError"`
+		Update     *UpdateView `json:"update"`
+		AttemptsOn bool        `json:"attemptsOn"`
+	}{View: v, HostsError: a.hostsErr, AttemptsOn: a.attemptsOn}
+	if a.Updater != nil {
+		uv := a.Updater.View()
+		extra.Update = &uv
+	}
 	a.mu.Unlock()
 	b, _ := json.Marshal(extra)
 	return b

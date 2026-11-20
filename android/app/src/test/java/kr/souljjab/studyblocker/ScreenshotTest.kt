@@ -155,6 +155,7 @@ class ScreenshotTest {
 
     @Test
     fun records() {
+        paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_5.copy(screenHeight = 3000))
         val base = state()
         fun u(agoMin: Long, min: Int, reason: String, endedAfterSec: Long = 0) = Unlock().apply {
             at = now - agoMin * 60_000L
@@ -177,6 +178,7 @@ class ScreenshotTest {
                         WeekChart(s.week, s.todayDone, s.now, pal)
                         UnlockLogHeader(2, 2, pal)
                         log.forEach { UnlockLogRow(it, now, pal) }
+                        UpdateCard(UpdateState(current = "2.1", state = "ready", latest = "2.2", notes = "예약 화면 개선"), false, "", pal, {}, {})
                     }
                 }
             }

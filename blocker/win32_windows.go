@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -37,6 +38,8 @@ var (
 	pShellNotifyIconW    = shell32.NewProc("Shell_NotifyIconW")
 	pShellExecuteW       = shell32.NewProc("ShellExecuteW")
 	pCreateMutexW        = kernel32.NewProc("CreateMutexW")
+	pCloseHandle         = kernel32.NewProc("CloseHandle")
+	pIsWindowVisible     = user32.NewProc("IsWindowVisible")
 	pGetModuleHandleW    = kernel32.NewProc("GetModuleHandleW")
 )
 
@@ -115,8 +118,32 @@ func setAutostart(on bool) error {
 
 // singleInstance는 이미 실행 중이면 false를 돌려준다.
 func singleInstance() bool {
-	pCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(u16("Local\\MollipStudyBlocker"))))
-	return syscall.GetLastError() != syscall.Errno(183) // ERROR_ALREADY_EXISTS
+	h, _, err := pCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(u16("Local\\MollipStudyBlocker"))))
+	if err == syscall.Errno(183) { // ERROR_ALREADY_EXISTS
+		// 손잡이를 쥐고 있으면 앞 프로그램이 끝나도 뮤텍스가 남으므로 닫는다.
+		pCloseHandle.Call(h)
+		return false
+	}
+	return h != 0
+}
+
+// waitSingleInstance는 업데이트 직후, 옛 프로그램이 끝날 때까지 기다렸다가 실행 권한을 얻는다.
+func waitSingleInstance(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if singleInstance() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+func isWindowVisible(hwnd uintptr) bool {
+	r, _, _ := pIsWindowVisible.Call(hwnd)
+	return r != 0
 }
 
 func findMainWindow() uintptr {

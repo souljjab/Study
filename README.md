@@ -16,6 +16,7 @@ hosts 파일(Windows)과 VPN·접근성(안드로이드)으로 유튜브·SNS·�
 - **설정**: 타이머 길이, 해제 방식(바로 해제 / 15초 대기 후 해제 / 타이머 도는 동안 잠금), 차단 화면 문구, 컴퓨터 시작 시 실행, 알림음
 - 차단된 사이트에 접속하면 몰입 창이 앞으로 나와 차단 화면을 보여 주고, '막은 접속 시도'로 집계
 - 창을 닫으면 트레이(작업 표시줄 오른쪽)에서 계속 실행. 완전히 끝내려면 트레이 아이콘 우클릭 → 종료 (끝내면 차단이 풀림)
+- **자동 업데이트**: 켜고 1분 뒤, 그 뒤 6시간마다 새 버전을 확인해 내려받고 지문(SHA-256)을 검증. 트레이에 있고 타이머가 멈춰 있을 때 알아서 교체·재시작(차단은 끊기지 않음). 설정 → 업데이트에서 직접 확인·설치하거나 자동을 끌 수 있음
 - 상태 저장 위치: `%APPDATA%\Mollip\state.json` — 프로그램이 꺼져 있던 동안 흐른 시간도 다시 켜면 반영
 - 재빌드: `cd blocker && GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H windowsgui" -o ../dist/StudyBlocker.exe .`
 - 화면 개발: `cd blocker && STUDY_HOSTS=/tmp/hosts go run . -demo` → http://127.0.0.1:8765
@@ -30,6 +31,7 @@ hosts 파일(Windows)과 VPN·접근성(안드로이드)으로 유튜브·SNS·�
 
 ## 안드로이드 (APK)
 
+- **자동 업데이트**: 앱을 열 때 6시간마다 새 버전을 확인해 내려받고 지문을 검증. 화면 위 띠나 기록 → 앱 정보에서 [설치]를 한 번 누르면 안드로이드 설치 확인 창이 뜸(다른 경로로 설치한 앱은 안드로이드가 확인 없이 업데이트하지 못하게 함). 처음 한 번 이 앱의 '출처를 알 수 없는 앱 설치' 허용 필요. 빡집중 중에는 설치 불가
 - 화면 구성: 맨 아래 메뉴로 **집중**(타이머·시작) / **목록**(사이트·앱·보안 폴더) / **예약** / **기록**(오늘·연속·최근 7일 그래프·긴급 해제 기록)을 오감
 - 설치: `dist/StudyBlocker.apk`를 폰으로 옮겨 설치 ("출처를 알 수 없는 앱 설치" 허용 필요)
 - 처음 차단을 켤 때 VPN 연결 요청이 뜨면 "확인" (DNS 질의만 처리하며, 다른 트래픽은 그대로 통과)
@@ -72,3 +74,14 @@ hosts 파일(Windows)과 VPN·접근성(안드로이드)으로 유튜브·SNS·�
 | 빡집중 설정 | 빡집중 진행 중 | 빡집중 차단 화면 |
 |---|---|---|
 | ![](docs/screenshots/hard-setup.png) | ![](docs/screenshots/hard-active.png) | ![](docs/screenshots/hard-blocked.png) |
+
+## 업데이트 배포 방법
+
+두 앱은 공개 저장소 기본 브랜치의 `dist/update.json`을 읽어 새 버전을 찾습니다.
+
+1. 버전 올리기: `blocker/version.go`의 `appVersion`(예: 2.2.0), `android/app/build.gradle`의 `versionCode`(+1)·`versionName`
+2. 빌드: Windows exe(`dist/StudyBlocker.exe`), 안드로이드 `./gradlew assembleRelease` 후 `dist/StudyBlocker.apk`로 복사
+3. `python3 scripts/make_update_json.py --notes "바뀐 점"` → `dist/update.json` 생성(버전·주소·SHA-256·크기)
+4. 커밋해서 기본 브랜치에 푸시 → 몇 분 안에 앱들이 새 버전을 받음
+
+안드로이드는 같은 서명 키(`android/keystore/`)로 빌드해야 설치됩니다. 자동 업데이트가 들어간 2.1을 처음 한 번은 직접 설치해야 그다음부터 자동으로 받습니다.

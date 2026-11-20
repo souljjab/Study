@@ -47,6 +47,7 @@ type Settings struct {
 	BlockMsg     string `json:"blockMsg"`
 	Launch       bool   `json:"launch"`
 	Sound        bool   `json:"sound"`
+	ManualUpdate bool   `json:"manualUpdate"` // 자동 업데이트를 끈 경우(기본은 자동)
 }
 
 type Session struct {
@@ -763,7 +764,7 @@ func (e *Engine) applySettings(raw json.RawMessage) error {
 			if json.Unmarshal(v, &i) != nil {
 				continue
 			}
-		case "autoLink", "breakUnblock", "launch", "sound":
+		case "autoLink", "breakUnblock", "launch", "sound", "manualUpdate":
 			if json.Unmarshal(v, &b) != nil {
 				continue
 			}
@@ -808,6 +809,8 @@ func (e *Engine) applySettings(raw json.RawMessage) error {
 			s.Launch = b
 		case "sound":
 			s.Sound = b
+		case "manualUpdate":
+			s.ManualUpdate = b
 		}
 	}
 	return nil

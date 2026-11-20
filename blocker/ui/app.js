@@ -89,7 +89,8 @@ function App() {
   const [blockPage, setBlockPage] = useState(null); // { domain, preview }
   const [schedError, setSchedError] = useState('');
   const [rev, setRev] = useState(0); // 대화상자 취소 시 시간 입력칸을 되돌리려고 다시 그린다
-  const [unlockForm, setUnlockForm] = useState(null); // 긴급 잠금 해제 입력 { reason, min, custom, error }
+  const [unlockForm, setUnlockForm] = useState(null);
+  const [updateErr, setUpdateErr] = useState(''); // 긴급 잠금 해제 입력 { reason, min, custom, error }
   const seenOnboard = useRef(false);
 
   const apply = (r) => { if (r && r.state) setS(r.state); return r; };
@@ -252,6 +253,9 @@ function App() {
     if (r && !r.error) setUnlockForm(null);
   }
   const endUnlock = () => act('endUnlock');
+  // ── 업데이트 ──
+  const checkUpdate = () => { setUpdateErr(''); act('checkUpdate'); };
+  const applyUpdate = () => { setUpdateErr(''); act('applyUpdate', {}, setUpdateErr); };
   // ── 예약 ──
   const schedGuard = (sc, title, body, fn) => (sc.active ? guard(title, body, fn) : fn());
   const addSchedule = (tpl = {}) => act('addSchedule', { name: tpl.name || '', sched: tpl.name ? { days: tpl.days, start: tpl.start, end: tpl.end } : null }, setSchedError).then((r) => r && !r.error && setSchedError(''));
@@ -291,6 +295,16 @@ function App() {
   const upcoming = S.schedules.filter((x) => x.next).sort((a, b) => rankNext(a.next).localeCompare(rankNext(b.next)))[0];
   const schedSummary = activeScheds.length ? `지금 차단 중 · ${schedEnd}까지` : upcoming ? `다음 · ${upcoming.next}` : '없음';
   const nav = [navItem('focus', '집중', 'ph-timer'), navItem('list', '차단 목록', 'ph-list-checks', String(S.presets.length)), navItem('schedule', '예약', 'ph-calendar-check', S.schedules.length ? String(S.schedules.length) : ''), navItem('stats', '기록', 'ph-chart-bar'), navItem('settings', '설정', 'ph-gear-six')];
+  const upd = S.update;
+  const updChecked = upd && upd.checked ? (() => { const d = new Date(upd.checked); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; })() : '';
+  const updStatus = !upd ? '' : {
+    idle: '아직 확인하지 않았어요',
+    checking: '새 버전이 있는지 확인하는 중…',
+    downloading: `새 버전 ${upd.latest} 내려받는 중…`,
+    latest: `최신 버전이에요${updChecked ? ` · ${updChecked}에 확인` : ''}`,
+    ready: `새 버전 ${upd.latest}을 받아 뒀어요`,
+    error: `확인하지 못했어요: ${upd.error}`,
+  }[upd.state] || '';
   const unlocking = S.unlockUntil > 0;
   const unlockLeft = Math.max(0, Math.round((S.unlockUntil - S.now) / 1000));
   const currentUnlock = unlocking ? S.unlocks.find((u) => u.ongoing) : null;
@@ -791,6 +805,25 @@ function App() {
         </div>
         <div class="text-muted" style="font-size:12px;">창을 닫으면 작업 표시줄 오른쪽 트레이에서 계속 실행돼요.</div>
       </section>
+      ${upd && html`
+      <section style="display:flex;flex-direction:column;gap:var(--space-2);">
+        <h6 class="text-muted" style="margin-bottom:var(--space-2);">업데이트</h6>
+        <div style="display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) 0;">
+          <div style="flex:1;min-width:0;"><div style="font-size:14px;">자동 업데이트</div><div class="text-muted" style="font-size:12px;">새 버전을 알아서 내려받고, 트레이에 있고 타이머가 멈춰 있을 때 설치해요</div></div>
+          <${Switch} on=${!st.manualUpdate} onClick=${() => setSetting({ manualUpdate: !st.manualUpdate })} label="자동 업데이트" />
+        </div>
+        <div style="display:flex;align-items:center;gap:var(--space-4);padding:var(--space-3) 0;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <div style="font-size:14px;">현재 버전 ${upd.current}</div>
+            <div class="text-muted" style="font-size:12px;">${updStatus}</div>
+          </div>
+          ${upd.state === 'ready'
+            ? html`<button class="btn btn-primary" onClick=${applyUpdate}><i class="ph ph-arrow-circle-up"></i>${upd.latest}로 업데이트</button>`
+            : html`<button class="btn btn-secondary" onClick=${checkUpdate} disabled=${upd.state === 'checking' || upd.state === 'downloading'}><i class="ph ph-arrows-clockwise"></i>업데이트 확인</button>`}
+        </div>
+        ${upd.state === 'ready' && upd.notes && html`<div class="text-muted" style="font-size:12px;white-space:pre-line;">바뀐 점: ${upd.notes}</div>`}
+        ${updateErr && html`<div style="font-size:12px;color:var(--color-accent-300);">${updateErr}</div>`}
+      </section>`}
     </div>`;
 
   const bpLabel = isWatch ? '지금까지 집중한 시간' : t.running || t.remaining < t.total ? '이번 세션 남은 시간' : '다음 세션 길이';
@@ -968,6 +1001,7 @@ function App() {
     <div style="display:grid;grid-template-columns:224px minmax(0,1fr);min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body);">
       ${sidebar}
       <main style="padding:var(--space-8) 40px 64px;max-width:1120px;width:100%;">
+        ${upd && upd.state === 'ready' && view !== 'settings' && html`<div class="card" style="flex-direction:row;align-items:center;gap:var(--space-3);padding:var(--space-4);margin-bottom:var(--space-6);box-shadow:0 0 0 1px var(--color-divider);flex-wrap:wrap;"><i class="ph ph-arrow-circle-up" style="font-size:18px;color:var(--color-accent);"></i><span style="font-size:13px;flex:1;">새 버전 ${upd.latest}이 준비됐어요.${upd.notes ? ` ${upd.notes.split('\n')[0]}` : ''}</span><button class="btn btn-secondary" onClick=${applyUpdate}>지금 업데이트</button></div>`}
         ${S.hostsError && html`<div class="card" style="flex-direction:row;align-items:center;gap:var(--space-3);padding:var(--space-4);margin-bottom:var(--space-6);box-shadow:0 0 0 1px var(--color-accent);"><i class="ph ph-warning" style="font-size:18px;color:var(--color-accent);"></i><span style="font-size:13px;">차단을 적용하지 못했어요: ${S.hostsError}</span></div>`}
         ${unlockBanner}
         ${view === 'focus' && focusView}

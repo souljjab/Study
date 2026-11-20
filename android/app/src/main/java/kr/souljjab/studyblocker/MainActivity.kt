@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
             startService(Intent(this, BlockVpnService::class.java))
         }
         ScheduleAlarm.arm(this)
+        Updater.maybeCheck(this)
     }
 }
 
@@ -124,6 +125,7 @@ internal data class UiState(
     val hardEnd: Long = 0,
     val hardApps: Set<String> = emptySet(),
     val notifBlock: Boolean = true,
+    val update: UpdateState = UpdateState(),
 ) {
     /** 오늘 실제로 집중한 분(진행 중인 집중의 남은 시간은 뺀다). */
     val todayDone: Int
@@ -184,6 +186,7 @@ internal fun readState(c: Context) = UiState(
         hardEnd = Store.hardEnd(c),
         hardApps = Store.hardApps(c),
         notifBlock = Store.notifBlock(c),
+        update = UpdateState.read(),
     )
 }
 
@@ -272,6 +275,7 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
     val hardMinutes = if (hardPreset > 0) hardPreset else hardCustom.toIntOrNull() ?: 0
     var hardPick by remember { mutableStateOf(false) }
     var hardConfirm by remember { mutableStateOf(false) }
+    var updateErr by remember { mutableStateOf("") }
     LaunchedEffect(unlockRequest) {
         if (unlockRequest) {
             if (s.canUnlock && !s.unlockWait) unlockOpen = true
@@ -341,6 +345,9 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
                 }
             }
             if (!s.perms.requiredDone) item { PermBanner(s.perms, pal) { showPerms = true } }
+            if (s.update.state == "ready" && page != 3 && !s.hard) {
+                item { UpdateBanner(s.update, pal) { updateErr = Updater.install(ctx) ?: "" } }
+            }
             when (page) {
                 0 -> if (s.hard) {
                     item { TimerBlock(s, pal, minutes) }
@@ -492,6 +499,13 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
                     item { UnlockLogHeader(s.unlocks.count { it.at >= s.now - 7 * 24 * 3600_000L }, s.unlocks.size, pal) }
                     if (s.unlocks.isEmpty()) item { Text("긴급 잠금 해제를 한 적이 없어요.", color = pal.muted) }
                     items(s.unlocks, key = { it.at }) { u -> UnlockLogRow(u, s.now, pal) }
+                    item {
+                        UpdateCard(
+                            s.update, s.hard, updateErr, pal,
+                            onCheck = { updateErr = ""; Updater.checkAsync(ctx) },
+                            onInstall = { updateErr = Updater.install(ctx) ?: "" },
+                        )
+                    }
                 }
             }
         }

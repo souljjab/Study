@@ -73,6 +73,10 @@ final class Store {
         return out;
     }
 
+    static long lastUpdateCheck(Context c) { return p(c).getLong("lastUpdateCheck", 0); }
+
+    static void setLastUpdateCheck(Context c, long t) { p(c).edit().putLong("lastUpdateCheck", t).apply(); }
+
     /** 집중 중(차단 중)에 알림을 받지 않을지. 기본으로 켜져 있다. */
     static boolean notifBlock(Context c) { return p(c).getBoolean("notifBlock", true); }
 
