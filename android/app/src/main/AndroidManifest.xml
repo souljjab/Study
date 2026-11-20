@@ -68,6 +68,16 @@
                 android:resource="@xml/accessibility_config" />
         </service>
 
+        <service
+            android:name=".FocusNotificationService"
+            android:exported="true"
+            android:label="공부 집중 차단기"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".ScheduleAlarm"
             android:exported="false" />

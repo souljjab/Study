@@ -123,6 +123,7 @@ internal data class UiState(
     val hardStart: Long = 0,
     val hardEnd: Long = 0,
     val hardApps: Set<String> = emptySet(),
+    val notifBlock: Boolean = true,
 ) {
     /** 오늘 실제로 집중한 분(진행 중인 집중의 남은 시간은 뺀다). */
     val todayDone: Int
@@ -182,6 +183,7 @@ internal fun readState(c: Context) = UiState(
         hardStart = Store.hardStart(c),
         hardEnd = Store.hardEnd(c),
         hardApps = Store.hardApps(c),
+        notifBlock = Store.notifBlock(c),
     )
 }
 
@@ -310,6 +312,7 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
             onAppInfo = { openAppInfo(ctx) },
             onBattery = { requestBatteryExemption(ctx) },
             onAlwaysOn = { openVpnSettings(ctx) },
+            onNotif = { openNotificationAccess(ctx) },
             onDone = { showPerms = false },
         )
         return
@@ -421,6 +424,12 @@ internal fun MainScreen(unlockRequest: Boolean = false, onUnlockRequestHandled: 
                             SiteRow(d, pal, deletable = !s.listLocked) { toDelete = d }
                         }
                     } else {
+                        item {
+                            NotificationRow(s.notifBlock, s.perms.notif, s.listLocked, pal, onAccess = { openNotificationAccess(ctx) }) { on ->
+                                Store.setNotifBlock(ctx, on)
+                                version++
+                            }
+                        }
                         if (s.secureFolderAvailable) {
                             item {
                                 SecureFolderRow(s.secureFolder, s.listLocked, pal) { on ->
@@ -970,6 +979,43 @@ internal fun WeekChart(week: List<Int>, todayDone: Int, now: Long, pal: Palette)
                         fontWeight = if (today) FontWeight.Black else FontWeight.Normal,
                     )
                 }
+            }
+        }
+    }
+}
+
+/** 집중 중 알림 차단 스위치. 알림 접근 권한이 없으면 켜는 버튼을 보여 준다. */
+@Composable
+internal fun NotificationRow(on: Boolean, access: Boolean, locked: Boolean, pal: Palette, onAccess: () -> Unit, onChange: (Boolean) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .border(2.dp, pal.fg)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("집중 중 알림 차단", color = pal.fg, fontWeight = FontWeight.Black)
+                Text(
+                    "집중하는 동안 알림 소리를 끄고 알림을 숨겨요. 끝나면 미뤄 둔 알림이 다시 나타나요. 알람과 전화는 그대로예요.",
+                    color = pal.muted,
+                    fontSize = 12.sp,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            SquareToggle(on, pal, enabled = !(locked && on), onChange = onChange)
+        }
+        if (on && !access) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(pal.accent)
+                    .clickable(onClick = onAccess)
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("알림 접근 권한 켜기", color = pal.onAccent, fontWeight = FontWeight.Black)
             }
         }
     }

@@ -118,6 +118,25 @@ class ScreenshotTest {
     }
 
     @Test
+    fun notifications() {
+        val s = state(locked = true)
+        val pal = palette(s.mode, false)
+        paparazzi.snapshot {
+            StudyTheme {
+                WithNav(1, pal) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Header(s, pal) {}
+                        Tabs(1, s, pal) {}
+                        NotificationRow(on = true, access = false, locked = false, pal = pal, onAccess = {}) {}
+                        NotificationRow(on = true, access = true, locked = true, pal = pal, onAccess = {}) {}
+                        SecureFolderRow(on = true, locked = true, pal = pal) {}
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun listPage() {
         val s = state()
         val pal = palette(s.mode, false)

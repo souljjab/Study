@@ -73,6 +73,23 @@ final class Store {
         return out;
     }
 
+    /** 집중 중(차단 중)에 알림을 받지 않을지. 기본으로 켜져 있다. */
+    static boolean notifBlock(Context c) { return p(c).getBoolean("notifBlock", true); }
+
+    static void setNotifBlock(Context c, boolean v) { p(c).edit().putBoolean("notifBlock", v).apply(); }
+
+    /** 지금 알림을 막아야 하는지. */
+    static boolean silenceNow(Context c) { return notifBlock(c) && shouldBlock(c); }
+
+    /** 우리가 방해 금지를 켰는지와, 켜기 전의 방해 금지 상태(끝나면 되돌린다). */
+    static boolean dndByUs(Context c) { return p(c).getBoolean("dndByUs", false); }
+
+    static int dndBefore(Context c) { return p(c).getInt("dndBefore", 0); }
+
+    static void setDndByUs(Context c, boolean v, int before) {
+        p(c).edit().putBoolean("dndByUs", v).putInt("dndBefore", before).commit();
+    }
+
     /** 차단 중에 삼성 보안 폴더도 막을지. 기본으로 켜져 있다. */
     static boolean secureFolderBlock(Context c) { return p(c).getBoolean("secureFolderBlock", true); }
 

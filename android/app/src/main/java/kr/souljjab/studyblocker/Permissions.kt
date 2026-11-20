@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /** 앱이 실행 중에 받아야 하는 권한 상태. */
-internal data class Perms(val vpn: Boolean, val acc: Boolean, val battery: Boolean) {
+internal data class Perms(val vpn: Boolean, val acc: Boolean, val battery: Boolean, val notif: Boolean = false) {
     val requiredDone: Boolean get() = vpn && acc
     val requiredCount: Int get() = listOf(vpn, acc).count { it }
 }
@@ -45,6 +45,7 @@ internal fun readPerms(c: Context): Perms {
         vpn = VpnService.prepare(c) == null,
         acc = AppGuardService.isEnabled(c),
         battery = pm?.isIgnoringBatteryOptimizations(c.packageName) == true,
+        notif = FocusNotificationService.isEnabled(c),
     )
 }
 
@@ -65,6 +66,17 @@ internal fun openAccessibilitySettings(c: Context) {
     val me = ComponentName(c, AppGuardService::class.java).flattenToString()
     // 일부 기기는 이 값으로 우리 앱 항목을 강조해 준다.
     c.tryStart(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).putExtra(":settings:fragment_args_key", me))
+}
+
+internal fun openNotificationAccess(c: Context) {
+    val me = ComponentName(c, FocusNotificationService::class.java).flattenToString()
+    val detail = if (Build.VERSION.SDK_INT >= 30) {
+        Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+            .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, me)
+    } else {
+        null
+    }
+    c.tryStart(*listOfNotNull(detail, Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)).toTypedArray())
 }
 
 internal fun openAppInfo(c: Context) {
@@ -93,6 +105,7 @@ internal fun PermissionScreen(
     onBattery: () -> Unit,
     onAlwaysOn: () -> Unit,
     onDone: () -> Unit,
+    onNotif: () -> Unit = {},
 ) {
     LazyColumn(
         Modifier
@@ -159,7 +172,23 @@ internal fun PermissionScreen(
         }
         item {
             PermCard(
-                no = "04", title = "항상 켜진 VPN", tag = "선택", pal = pal,
+                no = "04", title = "알림 접근", tag = "권장", pal = pal,
+                desc = "집중하는 동안 알림을 받지 않게 할 때 씁니다. 소리를 끄고 알림을 집중이 끝날 때까지 " +
+                    "미뤄 둘 뿐, 알림 내용을 저장하거나 보내지 않습니다.",
+                granted = p.notif, action = "설정 열기", onClick = onNotif,
+            ) {
+                if (showRestrictedHelp && !p.notif) {
+                    Text(
+                        "켜지지 않으면 위 '접근성'과 같은 방법으로 '제한된 설정 허용'을 먼저 해 주세요.",
+                        color = pal.muted,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+        }
+        item {
+            PermCard(
+                no = "05", title = "항상 켜진 VPN", tag = "선택", pal = pal,
                 desc = "VPN 설정에서 '공부 집중 차단기' 옆 ⚙ → '항상 켜진 VPN'을 켜면 " +
                     "재부팅하거나 앱이 종료돼도 차단이 자동으로 다시 켜집니다.",
                 granted = null, action = "VPN 설정 열기", onClick = onAlwaysOn,
